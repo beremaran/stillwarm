@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stillwarm"
+version = "0.1.0"
+description = "Automatic KV-cache session persistence for llama-server: save the model's 'notes' to disk, restore them after a restart, refuse incompatible files."
+readme = "README.md"
+requires-python = ">=3.9"
+# ZERO runtime dependencies — by design (stillwarm-bench PLAN §7.2).
+dependencies = []
+authors = [{name = "Vimal Nakrani", email = "vimalnak@gmail.com"}]
+license = {file = "LICENSE"}
+keywords = ["llama.cpp", "llama-server", "kv-cache", "local-llm"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+[project.scripts]
+stillwarm = "stillwarm.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
