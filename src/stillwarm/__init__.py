@@ -10,7 +10,7 @@ from .server import LlamaServer, ServerError, PROBE_SAMPLER, PROBE_N_PREDICT
 from .session import Session, AskResult, RefusedRestore, VerifyFailed, IneffectiveRestoreWarning
 from . import store
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __all__ = ["Sidecar", "sidecar_path_for", "SIDECAR_VERSION", "ServerProfile",
            "Decision", "check", "check_build", "REFUSE", "ADVISORY", "OK",
            "LlamaServer", "ServerError", "PROBE_SAMPLER", "PROBE_N_PREDICT",
