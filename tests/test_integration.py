@@ -215,7 +215,7 @@ def test_lru_prune_via_session(cache_dir):
 
 
 def test_save_point_after_generation_in_ask_flow(cache_dir):
-    """Gate-3 fix regression: ask() generates a reply, so the saved state ends
+    """Regression: ask() generates a reply, so the saved state ends
     with sampled tokens -> sidecar must say after_generation (was mislabeled)."""
     with Server() as api:
         sw = make_session(api, cache_dir)

@@ -13,7 +13,7 @@ stillwarm-bench Block-D outcome, 2026-07-05):
   - build_tag / llamacpp_commit: measured STABLE across >=5 weeks of releases
     (b9386<->b9871 both directions) -> ADVISORY warning only, never a refusal.
   - probe_hash: SHA-256 of a 64-token greedy continuation captured AT SAVE
-    TIME. `--verify` (Phase 3 later work) regenerates after restore and compares
+    TIME. `verify` regenerates the probe after a restore and compares
     against THIS hash — a determinism check, deliberately NOT cold-equivalence
     (which measurably fails for quantized caches without any corruption).
 """
@@ -95,7 +95,8 @@ class Sidecar:
 
     # -- cache key ----------------------------------------------------------
     def cache_key(self) -> str:
-        """SHA-256 over exactly the fields Block D showed matter (PLAN §7.2):
+        """SHA-256 over exactly the fields the portability matrix (blockD.csv in the
+        results dataset) showed matter:
         model SHA + fa + ctk/ctv + swa_full + tokenized prefix. -ngl and ctx are
         deliberately excluded (measured irrelevant / handled by the ctx-fit rule)."""
         material = "\x1f".join([

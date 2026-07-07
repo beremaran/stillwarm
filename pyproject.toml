@@ -8,7 +8,7 @@ version = "0.1.1"
 description = "Automatic KV-cache session persistence for llama-server: save the model's 'notes' to disk, restore them after a restart, refuse incompatible files."
 readme = "README.md"
 requires-python = ">=3.9"
-# ZERO runtime dependencies — by design (stillwarm-bench PLAN §7.2).
+# ZERO runtime dependencies — by design.
 dependencies = []
 authors = [{name = "Vimal Nakrani", email = "vimalnak@gmail.com"}]
 license = {file = "LICENSE"}

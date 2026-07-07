@@ -18,7 +18,8 @@ Design decisions (each grounded in a measured stillwarm-bench result):
   * --verify is a DETERMINISM check against the save-time probe hash — deliberately
     NOT cold-equivalence, which measurably fails for quantized caches (Block C).
   * after every restore, the first request's server-reported prompt_n is inspected;
-    near-full re-prefill triggers a loud SILENTLY-INEFFECTIVE warning (Gate-0 finding).
+    near-full re-prefill triggers a loud SILENTLY-INEFFECTIVE warning (a measured
+    llama.cpp failure mode; see the stillwarm-bench results).
 """
 from __future__ import annotations
 
@@ -137,7 +138,7 @@ class Session:
         (0 for a pure prefill/prime save). It determines the honest save_point label:
         an after_generation state is NOT a strict prefix of a future prompt that asks
         a different question, which on SWA models forces an impossible rollback
-        (measured: stillwarm-bench WS1.4)."""
+        (measured in stillwarm-bench)."""
         prefix = self._live_prefix.get(session_id)
         if prefix is None:
             raise ValueError(f"session {session_id!r} has no live state to save")
@@ -222,7 +223,7 @@ class Session:
         return verified
 
     # ==========================================================================
-    # SILENTLY-INEFFECTIVE GUARD (Gate-0 finding as a runtime feature)
+    # SILENTLY-INEFFECTIVE GUARD (a measured failure mode, surfaced as a warning)
     # ==========================================================================
     def _ineffective_guard(self, session_id: str, full_prompt: str,
                            prompt_n: Optional[int]) -> str:

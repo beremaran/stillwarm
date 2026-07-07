@@ -46,7 +46,7 @@ def test_prune_under_budget_noop(tmp_path):
 
 def test_prune_tolerates_locked_files(tmp_path, monkeypatch):
     """Windows holds open files: PermissionError on unlink must skip the locked
-    session and keep pruning others (Gate-4.1 Windows audit)."""
+    session and keep pruning others (Windows holds open files)."""
     from pathlib import Path
     _mk_session(tmp_path, "locked", 600, age_s=2000)
     _mk_session(tmp_path, "old", 600, age_s=1000)
