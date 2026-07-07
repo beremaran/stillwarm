@@ -1,2 +1,0 @@
-[console_scripts]
-stillwarm = stillwarm.cli:main
