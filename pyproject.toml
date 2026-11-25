@@ -10,9 +10,9 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "click>=8.5.1",
-    "httpx",
-    "orjson",
-    "pydantic-settings",
+    "httpx>=0.28.1",
+    "orjson>=3.13.0",
+    "pydantic-settings>=2.16.3",
     "rich>=15.0.0",
 ]
 authors = [{name = "Vimal Nakrani", email = "vimalnak@gmail.com"}]
