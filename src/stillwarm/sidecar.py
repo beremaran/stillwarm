@@ -7,8 +7,8 @@ The sidecar is what makes restores SAFE: before loading a save file into
 llama-server, stillwarm checks the sidecar against the running server and
 REFUSES incompatible files instead of letting them misload silently.
 
-Schema v1 field provenance (every compatibility field is grounded in a measured
-stillwarm-bench Block-D outcome, 2026-07-05):
+Schema v1 field provenance (every compatibility field is grounded in measured
+llama.cpp behavior):
   - flash_attn, cache_type_k/v, swa_full, model_sha256: restore across a
     mismatch either fails or is meaningless -> part of the REFUSE contract.
   - n_saved_tokens: llama-server refuses states larger than the server ctx

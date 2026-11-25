@@ -3,8 +3,8 @@
 
 """Thin llama-server HTTP client. Standard library only (zero-dep contract).
 
-Covers exactly the endpoints stillwarm needs, with shapes verified against the
-pinned llama.cpp build (b9871) during the stillwarm-bench measurements:
+Covers exactly the endpoints stillwarm needs, with shapes verified against
+llama.cpp release b9871:
   GET  /health
   POST /tokenize            {"content": str}            -> {"tokens": [int]}
   POST /completion          (non-stream)                -> {..., "timings": {...}}

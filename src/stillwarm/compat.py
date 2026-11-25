@@ -3,7 +3,7 @@
 
 """Compatibility decision: may this save file be restored into this server.
 
-Categories mirror the measured stillwarm-bench Block-D taxonomy:
+Verdicts reflect measured llama.cpp behavior:
   REFUSE    — a mismatch that measurably fails or silently misbehaves; never load.
   ADVISORY  — measurably compatible, but worth a warning (e.g. build drift).
   OK        — no known incompatibility.

@@ -15,16 +15,16 @@ restore-before-request, save-after-response, against a running llama-server:
     ... server restarts ...
     reply = sw.ask("sess-1", document + question2, n_predict=256)
 
-Design decisions (each grounded in a measured stillwarm-bench result):
+Design decisions (each grounded in measured llama.cpp behavior):
   * cache key = model SHA + fa + ctk/ctv + swa_full + tokenized-prefix hash
-    (Block D: -ngl excluded; ctx via fit rule; build tag advisory).
+    (-ngl excluded; ctx via fit rule; build tag advisory).
   * saves happen at the PREFIX state, BEFORE probe generation (save_point=doc_prefill):
     the file must represent the pre-probe state.
   * --verify is a DETERMINISM check against the save-time probe hash — deliberately
-    NOT cold-equivalence, which measurably fails for quantized caches (Block C).
+    NOT cold-equivalence, which measurably fails for quantized caches.
   * after every restore, the first request's server-reported prompt_n is inspected;
     near-full re-prefill triggers a loud SILENTLY-INEFFECTIVE warning (a measured
-    llama.cpp failure mode; see the stillwarm-bench results).
+    llama.cpp failure mode).
 """
 
 from __future__ import annotations
@@ -48,8 +48,8 @@ DEFAULT_N_PREDICT = 256
 
 # Silently-ineffective-restore guard: if the first request after a restore
 # re-prefills more than this fraction of the prompt — or more than this many
-# tokens, whichever is larger — the restore did not take. Measured detection
-# boundary (stillwarm-bench); override with the STILLWARM_GUARD_* env vars.
+# tokens, whichever is larger — the restore did not take. Override with the
+# STILLWARM_GUARD_* env vars.
 _INEFFECTIVE_RATIO = 0.5
 _INEFFECTIVE_MIN_TOKENS = 64
 _ENV_GUARD_RATIO = "STILLWARM_GUARD_RATIO"
@@ -217,8 +217,7 @@ class Session:
         `generated_tokens` = sampled tokens the slot state currently ends with
         (0 for a pure prefill/prime save). It determines the honest save_point label:
         an after_generation state is NOT a strict prefix of a future prompt that asks
-        a different question, which on SWA models forces an impossible rollback
-        (measured in stillwarm-bench).
+        a different question, which on SWA models forces an impossible rollback.
         """
         prefix = self._live_prefix.get(session_id)
         if prefix is None:
@@ -282,7 +281,7 @@ class Session:
         verified: bool | None = None
 
         if verify:
-            # Cost (measured, 8K/M3 Max): ~2x restore + ~1.5 s of 64-token decode.
+            # Cost: ~2x restore, plus a 64-token decode (~1.5 s for an 8B model).
             prefix = self._prefix_path(session_id).read_text(encoding="utf-8")
             probe = self.server.completion(
                 prefix,

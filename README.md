@@ -84,8 +84,7 @@ and the `store` module cannot see the files either.
 
 ## Compatibility
 
-Every row below comes from the 480-row benchmark matrix in [stillwarm-bench]
-(Block D portability taxonomy).
+Every row below is measured behavior, not speculation.
 
 | you change... | what happens | what stillwarm does |
 |---|---|---|
@@ -110,7 +109,7 @@ This is a determinism check (does the restored state reproduce the save-time
 continuation?), not a cold-equivalence check (does it match a full recompute?).
 Cold-equivalence measurably fails even without corruption: different prefill
 batch splits flip marginal tokens, and quantized caches amplify this to
-near-certainty (q4_0: 5 of 5 divergent at 8K in [stillwarm-bench] Block C)
+near-certainty (q4_0: 5 of 5 divergent at 8K)
 while both outputs stay coherent. A verify failure means the file, model, or
 config does not reproduce what was saved. That is a real integrity signal, not
 batching noise.
@@ -140,5 +139,3 @@ the integration tests skip, and the skip reason carries the run command.
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-[stillwarm-bench]: https://github.com/vimalnakrani08/stillwarm-bench

@@ -36,7 +36,7 @@ def test_ok() -> None:
     assert bool(d)
 
 
-def test_fa_mismatch_refused() -> None:  # Block D d5: FAILS-CLEAN both ways
+def test_fa_mismatch_refused() -> None:
     d = check(sc(), srv(flash_attn="off"))
     assert d.verdict == REFUSE
     assert not bool(d)
@@ -47,7 +47,7 @@ def test_cache_type_mismatch_refused() -> None:
     assert check(sc(), srv(cache_type_k="q8_0", cache_type_v="q8_0")).verdict == REFUSE
 
 
-def test_swa_full_mismatch_refused() -> None:  # Block E exhibit: SILENTLY-INEFFECTIVE
+def test_swa_full_mismatch_refused() -> None:
     assert check(sc(swa_full=True), srv(swa_full=False)).verdict == REFUSE
 
 
@@ -55,12 +55,12 @@ def test_model_mismatch_refused() -> None:
     assert check(sc(model_sha256="x" * 64), srv()).verdict == REFUSE
 
 
-def test_ctx_fit_rule() -> None:  # Block D d6 addendum
+def test_ctx_fit_rule() -> None:
     assert check(sc(n_saved_tokens=9000), srv(ctx_size=8192)).verdict == REFUSE
     assert check(sc(n_saved_tokens=4097), srv(ctx_size=8192)).verdict == OK
 
 
-def test_build_drift_advisory_only() -> None:  # Block D d3: WORKS both directions
+def test_build_drift_advisory_only() -> None:
     d = check_build(sc(build_tag="b9386"), "b9871")
     assert d.verdict == ADVISORY
     assert bool(d)
