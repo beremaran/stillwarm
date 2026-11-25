@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Vimal Nakrani
+# Licensed under the MIT license.
+
 """stillwarm — automatic KV-cache session persistence for llama-server.
 
 Your local LLM re-reads everything after every restart; stillwarm saves the
@@ -8,7 +11,13 @@ with an integrity sidecar so an incompatible file is refused, never misloaded.
 from . import store
 from .compat import ADVISORY, OK, REFUSE, Decision, ServerProfile, check, check_build
 from .server import PROBE_N_PREDICT, PROBE_SAMPLER, LlamaServer, ServerError
-from .session import AskResult, IneffectiveRestoreWarning, RefusedRestore, Session, VerifyFailed
+from .session import (
+    AskResult,
+    IneffectiveRestoreWarning,
+    RefusedRestoreError,
+    Session,
+    VerifyFailedError,
+)
 from .sidecar import SIDECAR_VERSION, Sidecar, sidecar_path_for
 
 __version__ = "0.1.1"
@@ -23,12 +32,12 @@ __all__ = [
     "Decision",
     "IneffectiveRestoreWarning",
     "LlamaServer",
-    "RefusedRestore",
+    "RefusedRestoreError",
     "ServerError",
     "ServerProfile",
     "Session",
     "Sidecar",
-    "VerifyFailed",
+    "VerifyFailedError",
     "__version__",
     "check",
     "check_build",

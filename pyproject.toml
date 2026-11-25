@@ -36,4 +36,5 @@ ignore = [
   "D203",  # incompatible with D211 (formatter uses D211)
   "D213",  # incompatible with D212 (formatter uses D212)
   "COM812",  # formatter manages trailing commas
+  "S310",  # base_url is always local llama-server (http://127.0.0.1:8080)
 ]

@@ -5,7 +5,7 @@ from stillwarm import store
 from stillwarm.sidecar import Sidecar
 
 
-def _mk_session(d, sid, size, age_s):
+def _mk_session(d, sid, size, age_s) -> None:
     b = d / f"{sid}.bin"
     b.write_bytes(b"\0" * size)
     Sidecar(
@@ -24,7 +24,7 @@ def _mk_session(d, sid, size, age_s):
     os.utime(b, (t, t))
 
 
-def test_list_sorted_oldest_first(tmp_path):
+def test_list_sorted_oldest_first(tmp_path) -> None:
     _mk_session(tmp_path, "new", 100, age_s=10)
     _mk_session(tmp_path, "old", 100, age_s=1000)
     recs = store.sessions(tmp_path)
@@ -32,7 +32,7 @@ def test_list_sorted_oldest_first(tmp_path):
     assert recs[0]["sidecar"]["n_saved_tokens"] == 10
 
 
-def test_prune_lru_removes_triple(tmp_path):
+def test_prune_lru_removes_triple(tmp_path) -> None:
     _mk_session(tmp_path, "old", 600, age_s=1000)
     _mk_session(tmp_path, "new", 600, age_s=10)
     rep = store.prune(tmp_path, budget_gb=1e-6)  # budget = 1000 bytes
@@ -43,18 +43,19 @@ def test_prune_lru_removes_triple(tmp_path):
     assert (tmp_path / "new.bin").exists()  # newest survives
 
 
-def test_prune_dry_run(tmp_path):
+def test_prune_dry_run(tmp_path) -> None:
     _mk_session(tmp_path, "a", 600, age_s=100)
     rep = store.prune(tmp_path, budget_gb=1e-9, dry_run=True)
-    assert rep["removed"] and (tmp_path / "a.bin").exists()
+    assert rep["removed"]
+    assert (tmp_path / "a.bin").exists()
 
 
-def test_prune_under_budget_noop(tmp_path):
+def test_prune_under_budget_noop(tmp_path) -> None:
     _mk_session(tmp_path, "a", 100, age_s=100)
     assert store.prune(tmp_path, budget_gb=1.0)["removed"] == []
 
 
-def test_prune_tolerates_locked_files(tmp_path, monkeypatch):
+def test_prune_tolerates_locked_files(tmp_path, monkeypatch) -> None:
     """Windows holds open files: PermissionError on unlink must skip the locked
     session and keep pruning others (Windows holds open files).
     """

@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Vimal Nakrani
+# Licensed under the MIT license.
+
 """Session store: list, inspect, and LRU-prune saved sessions under a disk budget.
 
 A stored session = <id>.bin (the KV state) + <id>.bin.stillwarm.json (sidecar)
@@ -8,15 +11,13 @@ updated on every save) and always removes the whole triple together.
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
-from typing import List
 
 from .sidecar import Sidecar, sidecar_path_for
 
 
-def _triple(bin_path: Path):
+def _triple(bin_path: Path) -> list[Path]:
     return [
         bin_path,
         sidecar_path_for(bin_path),
@@ -26,9 +27,9 @@ def _triple(bin_path: Path):
     ]
 
 
-def sessions(cache_dir) -> List[dict]:
+def sessions(cache_dir: str) -> list[dict]:
     """One record per stored session, oldest-used first."""
-    cache_dir = Path(os.path.expanduser(str(cache_dir)))
+    cache_dir = Path(str(cache_dir)).expanduser()
     out = []
     for bin_path in sorted(cache_dir.glob("*.bin")):
         rec = {
@@ -43,18 +44,19 @@ def sessions(cache_dir) -> List[dict]:
         if sc_path.exists():
             try:
                 rec["sidecar"] = Sidecar.read(sc_path).to_dict()
-            except Exception as e:  # unreadable sidecar is a fact worth surfacing
+            except (OSError, ValueError) as e:  # unreadable sidecar is a fact worth surfacing
                 rec["sidecar_error"] = str(e)
         out.append(rec)
     out.sort(key=lambda r: r["mtime"])
     return out
 
 
-def total_bytes(cache_dir) -> int:
+def total_bytes(cache_dir: str) -> int:
+    """Sum the byte sizes of all saved sessions."""
     return sum(r["bytes"] for r in sessions(cache_dir))
 
 
-def prune(cache_dir, budget_gb: float, *, dry_run: bool = False) -> dict:
+def prune(cache_dir: str, budget_gb: float, *, dry_run: bool = False) -> dict:
     """Delete least-recently-used session triples until under budget_gb.
 
     Windows note: files held open by another process raise PermissionError on
@@ -70,7 +72,7 @@ def prune(cache_dir, budget_gb: float, *, dry_run: bool = False) -> dict:
             break
         if dry_run:
             removed.append(
-                {"session_id": r["session_id"], "bytes": r["bytes"], "age_hours": r["age_hours"]}
+                {"session_id": r["session_id"], "bytes": r["bytes"], "age_hours": r["age_hours"]},
             )
             total -= r["bytes"]
             continue
@@ -82,7 +84,7 @@ def prune(cache_dir, budget_gb: float, *, dry_run: bool = False) -> dict:
             skipped_locked.append({"session_id": r["session_id"], "error": str(e)})
             continue  # locked (e.g. Windows open handle): skip
         removed.append(
-            {"session_id": r["session_id"], "bytes": r["bytes"], "age_hours": r["age_hours"]}
+            {"session_id": r["session_id"], "bytes": r["bytes"], "age_hours": r["age_hours"]},
         )
         total -= r["bytes"]
     return {

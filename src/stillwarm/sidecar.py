@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Vimal Nakrani
+# Licensed under the MIT license.
+
 """Metadata sidecar — one small JSON file next to every KV-cache save file.
 
 The sidecar is what makes restores SAFE: before loading a save file into
@@ -23,10 +26,8 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Union
 
 SIDECAR_VERSION = 1
 SIDECAR_SUFFIX = ".stillwarm.json"
@@ -61,46 +62,56 @@ class Sidecar:
     sidecar_version: int = SIDECAR_VERSION
 
     def __post_init__(self) -> None:
+        """Validate required fields and normalize values."""
         if self.flash_attn not in ("on", "off"):
-            raise ValueError(
+            msg = (
                 f"flash_attn must be resolved to 'on' or 'off' before saving "
                 f"(got {self.flash_attn!r}); 'auto' would make the compat check meaningless"
+            )
+            raise ValueError(
+                msg,
             )
         if not self.created_at:
             self.created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
     # -- serialization ------------------------------------------------------
     def to_dict(self) -> dict:
+        """Convert sidecar to a JSON-serializable dict."""
         return dataclasses.asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> Sidecar:
+        """Construct a Sidecar from a dict, validating the schema version."""
         version = d.get("sidecar_version")
         if version != SIDECAR_VERSION:
-            raise IncompatibleSidecar(
-                f"sidecar_version {version!r} not supported (expected {SIDECAR_VERSION})"
+            msg = f"sidecar_version {version!r} not supported (expected {SIDECAR_VERSION})"
+            raise IncompatibleSidecarError(
+                msg,
             )
         known = {f.name for f in dataclasses.fields(cls)}
         return cls(**{k: v for k, v in d.items() if k in known})
 
-    def write(self, path: Union[str, Path]) -> Path:
-        # atomic on POSIX and Windows: write a sibling temp file, then os.replace
+    def write(self, path: str | Path) -> Path:
+        """Write sidecar as JSON atomically to the given path."""
         path = Path(path)
         tmp = path.with_name(path.name + ".tmp")
         tmp.write_text(
-            json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
         )
-        os.replace(tmp, path)
+        tmp.replace(path)
         return path
 
     @classmethod
-    def read(cls, path: Union[str, Path]) -> Sidecar:
+    def read(cls, path: str | Path) -> Sidecar:
+        """Read and parse a sidecar JSON file."""
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
     # -- cache key ----------------------------------------------------------
     def cache_key(self) -> str:
-        """SHA-256 over exactly the fields the portability matrix (blockD.csv in the
-        results dataset) showed matter:
+        """Compute the cache key from material sidecar fields.
+
+        SHA-256 over exactly the fields the portability matrix showed matter:
         model SHA + fa + ctk/ctv + swa_full + tokenized prefix. -ngl and ctx are
         deliberately excluded (measured irrelevant / handled by the ctx-fit rule).
         """
@@ -112,16 +123,16 @@ class Sidecar:
                 self.cache_type_v,
                 "swa_full=1" if self.swa_full else "swa_full=0",
                 self.prompt_prefix_sha256,
-            ]
+            ],
         )
         return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
-class IncompatibleSidecar(ValueError):
+class IncompatibleSidecarError(ValueError):
     """Raised when a sidecar cannot even be parsed under this schema version."""
 
 
-def sidecar_path_for(save_file: Union[str, Path]) -> Path:
+def sidecar_path_for(save_file: str | Path) -> Path:
     """cache.bin -> cache.bin.stillwarm.json (same directory)."""
     p = Path(save_file)
     return p.with_name(p.name + SIDECAR_SUFFIX)

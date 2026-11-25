@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Vimal Nakrani
+# Licensed under the MIT license.
+
 """The stillwarm session wrapper — the core loop.
 
 restore-before-request, save-after-response, against a running llama-server:
@@ -24,13 +27,12 @@ Design decisions (each grounded in a measured stillwarm-bench result):
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
-import os
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from . import store as store_mod
 from .compat import REFUSE, ServerProfile, check, check_build
@@ -38,11 +40,11 @@ from .server import DEFAULT_SAMPLER, PROBE_N_PREDICT, PROBE_SAMPLER, LlamaServer
 from .sidecar import Sidecar, sidecar_path_for
 
 
-class RefusedRestore(RuntimeError):
+class RefusedRestoreError(RuntimeError):
     """The sidecar says this file must not be loaded into this server."""
 
 
-class VerifyFailed(RuntimeError):
+class VerifyFailedError(RuntimeError):
     """--verify: the restored state did not reproduce the save-time probe."""
 
 
@@ -52,40 +54,56 @@ class IneffectiveRestoreWarning(UserWarning):
 
 @dataclass
 class AskResult:
+    """Result of an ask() call."""
+
     content: str
     timings: dict
     restored: bool  # this request was served from a disk restore
-    verified: Optional[bool]  # None = --verify not requested
-    prompt_n: Optional[int]
+    verified: bool | None  # None = --verify not requested
+    prompt_n: int | None
     warning: str = ""
 
 
-def _hash_tokens(tokens) -> str:
+def _hash_tokens(tokens: list[int]) -> str:
     return hashlib.sha256(json.dumps(tokens, separators=(",", ":")).encode()).hexdigest()
 
 
 class Session:
-    def __init__(
+    """Wrapper around llama-server that auto-restores and saves KV-cache sessions."""
+
+    def __init__(  # noqa: PLR0913 — API signature; all params are meaningful
         self,
         server: LlamaServer,
         profile: ServerProfile,
-        cache_dir,
+        cache_dir: str,
         *,
         server_build_tag: str = "",
-        disk_budget_gb: Optional[float] = None,
+        disk_budget_gb: float | None = None,
         verify: bool = False,
         id_slot: int = 0,
-    ):
+    ) -> None:
+        """Initialize the session wrapper.
+
+        Args:
+            server: The LlamaServer HTTP client.
+            profile: The server's profile (model, cache types, etc.).
+            cache_dir: Directory for storing session KV-cache files.
+            server_build_tag: The llama.cpp build tag for advisory warnings.
+            disk_budget_gb: Maximum disk usage for all saved sessions.
+            verify: Whether to verify restores against probe hashes.
+            id_slot: The llama-server slot ID to use.
+
+        """
         self.server = server
         self.profile = profile
-        self.cache_dir = Path(os.path.expanduser(str(cache_dir)))
+        self.cache_dir = Path(str(cache_dir)).expanduser()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.server_build_tag = server_build_tag
         self.disk_budget_gb = disk_budget_gb
         self.verify = verify
         self.id_slot = id_slot
         self._live_prefix: dict = {}  # session_id -> prefix text currently in the slot
-        self._loaded: Optional[str] = None  # session_id currently in the slot
+        self._loaded: str | None = None  # session_id currently in the slot
 
     # -- paths ---------------------------------------------------------------
     def _bin_name(self, session_id: str) -> str:
@@ -111,8 +129,8 @@ class Session:
         full_prompt: str,
         n_predict: int = 256,
         *,
-        sampler: Optional[dict] = None,
-        verify: Optional[bool] = None,
+        sampler: dict | None = None,
+        verify: bool | None = None,
     ) -> AskResult:
         """restore-before-request -> completion -> save-after-response."""
         do_verify = self.verify if verify is None else verify
@@ -158,7 +176,9 @@ class Session:
     # SAVE — file is written at the PRE-probe state (save before probe; critical)
     # ==========================================================================
     def save(self, session_id: str, *, generated_tokens: int = 0) -> Sidecar:
-        """`generated_tokens` = sampled tokens the slot state currently ends with
+        """Save the slot's KV cache to disk and write its sidecar.
+
+        `generated_tokens` = sampled tokens the slot state currently ends with
         (0 for a pure prefill/prime save). It determines the honest save_point label:
         an after_generation state is NOT a strict prefix of a future prompt that asks
         a different question, which on SWA models forces an impossible rollback
@@ -166,7 +186,8 @@ class Session:
         """
         prefix = self._live_prefix.get(session_id)
         if prefix is None:
-            raise ValueError(f"session {session_id!r} has no live state to save")
+            msg = f"session {session_id!r} has no live state to save"
+            raise ValueError(msg)
         binname = self._bin_name(session_id)
         save_point = "after_generation" if generated_tokens > 0 else "doc_prefill"
 
@@ -206,27 +227,32 @@ class Session:
         # atomic prefix write (same temp + os.replace pattern; Windows-safe)
         ptmp = self._prefix_path(session_id).with_name(self._prefix_path(session_id).name + ".tmp")
         ptmp.write_text(prefix, encoding="utf-8")
-        os.replace(ptmp, self._prefix_path(session_id))
+        ptmp.replace(self._prefix_path(session_id))
         return sc
 
     # ==========================================================================
     # RESTORE (+ optional --verify: restore -> probe -> compare -> RE-RESTORE)
     # ==========================================================================
-    def restore(self, session_id: str, *, verify: bool = False) -> Optional[bool]:
+    def restore(self, session_id: str, *, verify: bool = False) -> bool | None:
+        """Restore a saved session into the server slot.
+
+        If verify=True, regenerates the probe and compares against the
+        save-time probe hash before re-restoring.
+        """
         binname = self._bin_name(session_id)
         sc = Sidecar.read(sidecar_path_for(self._bin_path(session_id)))
 
         # refusal contract BEFORE touching the server
         decision = check(sc, self.profile)
         if decision.verdict == REFUSE:
-            raise RefusedRestore("; ".join(decision.refusals))
+            raise RefusedRestoreError("; ".join(decision.refusals))
         adv = check_build(sc, self.server_build_tag)
         for a in adv.advisories:
             warnings.warn(a, UserWarning, stacklevel=2)
 
         self.server.slot_erase(self.id_slot)
         self.server.slot_restore(binname, self.id_slot)
-        verified: Optional[bool] = None
+        verified: bool | None = None
 
         if verify:
             # Cost (measured, 8K/M3 Max): ~2x restore + ~1.5 s of 64-token decode.
@@ -245,10 +271,13 @@ class Session:
             self.server.slot_erase(self.id_slot)
             self.server.slot_restore(binname, self.id_slot)
             if not verified:
-                raise VerifyFailed(
+                msg = (
                     f"restored state failed the determinism probe: expected "
                     f"{sc.probe_hash[:16]}..., got {got[:16]}... — the file, model, or "
                     f"server config does not reproduce the save-time continuation"
+                )
+                raise VerifyFailedError(
+                    msg,
                 )
 
         self._live_prefix[session_id] = (
@@ -262,8 +291,10 @@ class Session:
     # ==========================================================================
     # SILENTLY-INEFFECTIVE GUARD (a measured failure mode, surfaced as a warning)
     # ==========================================================================
-    def _ineffective_guard(self, session_id: str, full_prompt: str, prompt_n: Optional[int]) -> str:
-        """After a restore, the first request should only prefill the NEW tail.
+    def _ineffective_guard(self, session_id: str, full_prompt: str, prompt_n: int | None) -> str:
+        """Detect and warn when a restore was silently ineffective.
+
+        After a restore, the first request should only prefill the NEW tail.
         If the server reports (near-)full re-prefill, the restore was silently
         ineffective — warn loudly with the measured likely cause.
         """
@@ -277,10 +308,8 @@ class Session:
         if prompt_n <= max(0.5 * full_tokens, 64):
             return ""
         save_point = ""
-        try:
+        with contextlib.suppress(Exception):
             save_point = Sidecar.read(sidecar_path_for(self._bin_path(session_id))).save_point
-        except Exception:
-            pass
         causes = [
             "an SWA model (Gemma family) without --swa-full on the server",
             "a prompt that does not extend the saved prefix",
@@ -289,7 +318,7 @@ class Session:
             causes.append(
                 "the saved state ends with generated tokens (save_point=after_generation); "
                 "a new question that diverges from them forces a rollback, which SWA caches "
-                "without --swa-full cannot do (measured: full re-prefill)"
+                "without --swa-full cannot do (measured: full re-prefill)",
             )
         msg = (
             f"restore of session {session_id!r} was SILENTLY INEFFECTIVE: the first "

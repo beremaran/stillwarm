@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Vimal Nakrani
+# Licensed under the MIT license.
+
 """Thin llama-server HTTP client. Standard library only (zero-dep contract).
 
 Covers exactly the endpoints stillwarm needs, with shapes verified against the
@@ -13,14 +16,16 @@ from __future__ import annotations
 
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class ServerError(RuntimeError):
     """An HTTP error from llama-server, with the response body preserved."""
 
-    def __init__(self, status: int, body: str):
+    def __init__(self, status: int, body: str) -> None:
+        """Initialize with HTTP status code and response body."""
         self.status = status
         self.body = body
         super().__init__(f"llama-server HTTP {status}: {body[:300]}")
@@ -29,45 +34,56 @@ class ServerError(RuntimeError):
 #: pinned sampler parameters for probe generation — part of the sidecar contract.
 #: ignore_eos keeps every probe exactly PROBE_N_PREDICT tokens (constant-length
 #: probes make the determinism comparison independent of where EOS falls).
-PROBE_SAMPLER: Dict[str, Any] = {"temperature": 0, "top_k": 1, "seed": 42, "ignore_eos": True}
+PROBE_SAMPLER: dict[str, Any] = {"temperature": 0, "top_k": 1, "seed": 42, "ignore_eos": True}
 PROBE_N_PREDICT = 64
 
 #: default sampler for user requests through Session.ask (greedy, EOS honored).
-DEFAULT_SAMPLER: Dict[str, Any] = {"temperature": 0, "top_k": 1, "seed": 42}
+DEFAULT_SAMPLER: dict[str, Any] = {"temperature": 0, "top_k": 1, "seed": 42}
 
 
 class LlamaServer:
-    def __init__(self, base_url: str = "http://127.0.0.1:8080", timeout: float = 600.0):
+    """HTTP client for llama-server slot save/restore endpoints."""
+
+    def __init__(self, base_url: str = "http://127.0.0.1:8080", timeout: float = 600.0) -> None:
+        """Initialize with server base URL and request timeout."""
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
     # -- plumbing ------------------------------------------------------------
-    def _request(self, method: str, path: str, payload: Optional[dict] = None) -> dict:
+    def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
+        url = urllib.parse.urljoin(self.base_url, path)
+        scheme = urllib.parse.urlparse(url).scheme
+        if scheme not in ("http", "https"):
+            msg = f"URL must use http or https scheme: {url}"
+            raise ValueError(msg)
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
-        req = urllib.request.Request(
-            self.base_url + path,
+        req = urllib.request.Request(  # noqa: S310 — base_url is always local llama-server
+            url,
             data=data,
             method=method,
             headers={"Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:  # noqa: S310
                 return json.loads(resp.read().decode("utf-8") or "{}")
         except urllib.error.HTTPError as e:
             raise ServerError(e.code, e.read().decode("utf-8", "replace")) from None
 
     # -- endpoints -----------------------------------------------------------
     def health(self) -> bool:
+        """Check if the server is responding."""
         try:
             self._request("GET", "/health")
-            return True
         except (ServerError, urllib.error.URLError):
             return False
+        else:
+            return True
 
     def props(self) -> dict:
+        """Get server properties including loaded model info."""
         return self._request("GET", "/props")
 
-    def ctx_size(self) -> Optional[int]:
+    def ctx_size(self) -> int | None:
         """Per-slot context size, from /props when the build exposes it."""
         props = self.props()
         for probe in (("default_generation_settings", "n_ctx"),):
@@ -76,10 +92,11 @@ class LlamaServer:
                 return v[probe[1]]
         return None
 
-    def tokenize(self, text: str) -> List[int]:
+    def tokenize(self, text: str) -> list[int]:
+        """Tokenize text and return token IDs."""
         return self._request("POST", "/tokenize", {"content": text})["tokens"]
 
-    def completion(
+    def completion(  # noqa: PLR0913 — mirrors llama-server completion endpoint signature
         self,
         prompt: str,
         n_predict: int,
@@ -87,8 +104,9 @@ class LlamaServer:
         cache_prompt: bool = True,
         id_slot: int = 0,
         return_tokens: bool = True,
-        sampler: Optional[dict] = None,
+        sampler: dict | None = None,
     ) -> dict:
+        """Generate a completion with the given prompt and parameters."""
         body = {
             "prompt": prompt,
             "n_predict": n_predict,
@@ -101,10 +119,13 @@ class LlamaServer:
         return self._request("POST", "/completion", body)
 
     def slot_save(self, filename: str, id_slot: int = 0) -> dict:
+        """Save the KV cache for a slot to disk."""
         return self._request("POST", f"/slots/{id_slot}?action=save", {"filename": filename})
 
     def slot_restore(self, filename: str, id_slot: int = 0) -> dict:
+        """Restore the KV cache for a slot from disk."""
         return self._request("POST", f"/slots/{id_slot}?action=restore", {"filename": filename})
 
     def slot_erase(self, id_slot: int = 0) -> dict:
+        """Erase the slot, clearing its KV cache."""
         return self._request("POST", f"/slots/{id_slot}?action=erase", {})
