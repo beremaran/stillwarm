@@ -18,7 +18,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, cast
 
 
 class ServerError(RuntimeError):
@@ -44,22 +44,24 @@ class LlamaServer:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
-    def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
+    def _request(
+        self, method: str, path: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         url = urllib.parse.urljoin(self.base_url, path)
         scheme = urllib.parse.urlparse(url).scheme
         if scheme not in ("http", "https"):
             msg = f"URL must use http or https scheme: {url}"
             raise ValueError(msg)
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
-        req = urllib.request.Request(  # noqa: S310 — base_url is always local llama-server
+        req = urllib.request.Request(
             url,
             data=data,
             method=method,
             headers={"Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:  # noqa: S310
-                return json.loads(resp.read().decode("utf-8") or "{}")
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return dict(json.loads(resp.read().decode("utf-8") or "{}"))
         except urllib.error.HTTPError as e:
             raise ServerError(e.code, e.read().decode("utf-8", "replace")) from None
 
@@ -72,7 +74,7 @@ class LlamaServer:
         else:
             return True
 
-    def props(self) -> dict:
+    def props(self) -> dict[str, Any]:
         """Get server properties including loaded model info."""
         return self._request("GET", "/props")
 
@@ -82,12 +84,12 @@ class LlamaServer:
         for probe in (("default_generation_settings", "n_ctx"),):
             v = props.get(probe[0], {})
             if isinstance(v, dict) and isinstance(v.get(probe[1]), int):
-                return v[probe[1]]
+                return cast("int", v[probe[1]])
         return None
 
     def tokenize(self, text: str) -> list[int]:
         """Tokenize text and return token IDs."""
-        return self._request("POST", "/tokenize", {"content": text})["tokens"]
+        return cast("list[int]", self._request("POST", "/tokenize", {"content": text})["tokens"])
 
     def completion(  # noqa: PLR0913 — mirrors llama-server completion endpoint signature
         self,
@@ -97,8 +99,8 @@ class LlamaServer:
         cache_prompt: bool = True,
         id_slot: int = 0,
         return_tokens: bool = True,
-        sampler: dict | None = None,
-    ) -> dict:
+        sampler: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Generate a completion with the given prompt and parameters."""
         body = {
             "prompt": prompt,
@@ -111,14 +113,14 @@ class LlamaServer:
         body.update(sampler or PROBE_SAMPLER)
         return self._request("POST", "/completion", body)
 
-    def slot_save(self, filename: str, id_slot: int = 0) -> dict:
+    def slot_save(self, filename: str, id_slot: int = 0) -> dict[str, Any]:
         """Save the KV cache for a slot to disk."""
         return self._request("POST", f"/slots/{id_slot}?action=save", {"filename": filename})
 
-    def slot_restore(self, filename: str, id_slot: int = 0) -> dict:
+    def slot_restore(self, filename: str, id_slot: int = 0) -> dict[str, Any]:
         """Restore the KV cache for a slot from disk."""
         return self._request("POST", f"/slots/{id_slot}?action=restore", {"filename": filename})
 
-    def slot_erase(self, id_slot: int = 0) -> dict:
+    def slot_erase(self, id_slot: int = 0) -> dict[str, Any]:
         """Erase the slot, clearing its KV cache."""
         return self._request("POST", f"/slots/{id_slot}?action=erase", {})

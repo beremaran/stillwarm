@@ -33,6 +33,7 @@ import json
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 from . import store as store_mod
 from .compat import REFUSE, ServerProfile, check, check_build
@@ -57,7 +58,7 @@ class AskResult:
     """Result of an ask() call."""
 
     content: str
-    timings: dict
+    timings: dict[str, Any]
     restored: bool
     verified: bool | None
     prompt_n: int | None
@@ -102,7 +103,7 @@ class Session:
         self.disk_budget_gb = disk_budget_gb
         self.verify = verify
         self.id_slot = id_slot
-        self._live_prefix: dict = {}
+        self._live_prefix: dict[str, str] = {}
         self._loaded: str | None = None
 
     def _bin_name(self, session_id: str) -> str:
@@ -124,7 +125,7 @@ class Session:
         full_prompt: str,
         n_predict: int = 256,
         *,
-        sampler: dict | None = None,
+        sampler: dict[str, Any] | None = None,
         verify: bool | None = None,
     ) -> AskResult:
         """restore-before-request -> completion -> save-after-response."""
@@ -154,7 +155,7 @@ class Session:
         self.save(session_id, generated_tokens=generated_n)
 
         if self.disk_budget_gb is not None:
-            store_mod.prune(self.cache_dir, self.disk_budget_gb)
+            store_mod.prune(str(self.cache_dir), self.disk_budget_gb)
 
         return AskResult(
             content=res.get("content", ""),
@@ -191,7 +192,7 @@ class Session:
             id_slot=self.id_slot,
             sampler=dict(PROBE_SAMPLER),
         )
-        probe_hash = _hash_tokens(probe.get("tokens") or probe.get("content"))
+        probe_hash = _hash_tokens(cast("list[int]", probe.get("tokens") or []))
 
         sc = Sidecar(
             model_sha256=self.profile.model_sha256,
@@ -245,7 +246,7 @@ class Session:
                 id_slot=self.id_slot,
                 sampler=json.loads(sc.probe_sampler_json or "null") or dict(PROBE_SAMPLER),
             )
-            got = _hash_tokens(probe.get("tokens") or probe.get("content"))
+            got = _hash_tokens(cast("list[int]", probe.get("tokens") or []))
             verified = got == sc.probe_hash
             self.server.slot_erase(self.id_slot)
             self.server.slot_restore(binname, self.id_slot)

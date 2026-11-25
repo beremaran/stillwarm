@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Any
 
 from .sidecar import Sidecar, sidecar_path_for
 
@@ -27,11 +28,11 @@ def _triple(bin_path: Path) -> list[Path]:
     ]
 
 
-def sessions(cache_dir: str) -> list[dict]:
+def sessions(cache_dir: str) -> list[dict[str, Any]]:
     """One record per stored session, oldest-used first."""
-    cache_dir = Path(str(cache_dir)).expanduser()
-    out = []
-    for bin_path in sorted(cache_dir.glob("*.bin")):
+    cache_path = Path(str(cache_dir)).expanduser()
+    out: list[dict[str, Any]] = []
+    for bin_path in sorted(cache_path.glob("*.bin")):
         rec = {
             "session_id": bin_path.name[:-4],
             "bin": str(bin_path),
@@ -56,7 +57,7 @@ def total_bytes(cache_dir: str) -> int:
     return sum(r["bytes"] for r in sessions(cache_dir))
 
 
-def prune(cache_dir: str, budget_gb: float, *, dry_run: bool = False) -> dict:
+def prune(cache_dir: str, budget_gb: float, *, dry_run: bool = False) -> dict[str, Any]:
     """Delete least-recently-used session triples until under budget_gb.
 
     Windows note: files held open by another process raise PermissionError on

@@ -29,17 +29,21 @@ page cache, restore wins for any document longer than ~300 tokens.
 from stillwarm import LlamaServer, ServerProfile, Session
 
 # llama-server ... -fa on --slot-save-path ~/.stillwarm/   (must be running)
-server  = LlamaServer("http://127.0.0.1:8080")
-profile = ServerProfile(model_sha256="<sha256 of your .gguf>",
-                        flash_attn="on", cache_type_k="f16", cache_type_v="f16",
-                        swa_full=False, ctx_size=16384)
-sw = Session(server, profile, cache_dir="~/.stillwarm",
-             server_build_tag="b9871", disk_budget_gb=50)
+server = LlamaServer("http://127.0.0.1:8080")
+profile = ServerProfile(
+    model_sha256="<sha256 of your .gguf>",
+    flash_attn="on",
+    cache_type_k="f16",
+    cache_type_v="f16",
+    swa_full=False,
+    ctx_size=16384,
+)
+sw = Session(server, profile, cache_dir="~/.stillwarm", server_build_tag="b9871", disk_budget_gb=50)
 
 r = sw.ask("paper-review", document + "\n\nQ: Summarize.\nA:", n_predict=256)
 # ... llama-server restarts ...
 r = sw.ask("paper-review", document + "\n\nQ: And the weaknesses?\nA:", n_predict=256)
-print(r.restored, r.prompt_n)   # True, ~a few dozen tokens instead of thousands
+print(r.restored, r.prompt_n)  # True, ~a few dozen tokens instead of thousands
 ```
 
 `cache_dir` must be the directory passed to `--slot-save-path`. CLI:

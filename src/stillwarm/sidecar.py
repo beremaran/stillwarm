@@ -28,6 +28,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 SIDECAR_VERSION = 1
 SIDECAR_SUFFIX = ".stillwarm.json"
@@ -70,12 +71,12 @@ class Sidecar:
         if not self.created_at:
             self.created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert sidecar to a JSON-serializable dict."""
         return dataclasses.asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> Sidecar:
+    def from_dict(cls, d: dict[str, Any]) -> Sidecar:
         """Construct a Sidecar from a dict, validating the schema version."""
         version = d.get("sidecar_version")
         if version != SIDECAR_VERSION:

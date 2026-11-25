@@ -30,10 +30,12 @@ from stillwarm import (
 from stillwarm.sidecar import Sidecar, sidecar_path_for
 
 BIN = os.environ.get(
-    "STILLWARM_TEST_SERVER_BIN", "/Users/vimal/llamacpp-stillwarm/build/bin/llama-server",
+    "STILLWARM_TEST_SERVER_BIN",
+    "/Users/vimal/llamacpp-stillwarm/build/bin/llama-server",
 )
 MODEL = os.environ.get(
-    "STILLWARM_TEST_MODEL", "/Users/vimal/models/SmolLM2-135M-Instruct-Q8_0.gguf",
+    "STILLWARM_TEST_MODEL",
+    "/Users/vimal/models/SmolLM2-135M-Instruct-Q8_0.gguf",
 )
 MODEL_SHA = "5a1395716f7913741cc51d98581b9b1228d80987a9f7d3664106742eb06bba83"
 PORT = 8213
@@ -59,13 +61,38 @@ class Server:
     def __init__(self, ctx=1024, fa="on", extra=()) -> None:
         self.proc = None
         self.ctx = ctx
-        self.args = [BIN, "-m", MODEL, "-c", str(ctx), "-np", "1", "-ngl", "99", "--host", "127.0.0.1", "--port", str(PORT), "--seed", "42", "-fa", fa, "--cache-ram", "0", "--slot-save-path", self.save_dir, *list(extra)]
+        self.args = [
+            BIN,
+            "-m",
+            MODEL,
+            "-c",
+            str(ctx),
+            "-np",
+            "1",
+            "-ngl",
+            "99",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(PORT),
+            "--seed",
+            "42",
+            "-fa",
+            fa,
+            "--cache-ram",
+            "0",
+            "--slot-save-path",
+            self.save_dir,
+            *list(extra),
+        ]
 
     save_dir = ""  # set per-test via fixture
 
     def __enter__(self):
         self.proc = subprocess.Popen(
-            self.args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            self.args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         api = LlamaServer(f"http://127.0.0.1:{PORT}", timeout=120)
         for _ in range(200):
