@@ -4,12 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stillwarm"
-version = "0.2.0"
+version = "0.3.0"
 description = "Automatic KV-cache session persistence for llama-server: save the model's 'notes' to disk, restore them after a restart, refuse incompatible files."
 readme = "README.md"
 requires-python = ">=3.13"
-# ZERO runtime dependencies — by design.
-dependencies = []
+dependencies = ["httpx", "orjson"]
 authors = [{name = "Vimal Nakrani", email = "vimalnak@gmail.com"}]
 license = {file = "LICENSE"}
 keywords = ["llama.cpp", "llama-server", "kv-cache", "local-llm"]

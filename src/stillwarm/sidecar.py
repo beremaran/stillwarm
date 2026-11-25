@@ -22,10 +22,11 @@ llama.cpp behavior):
 """
 
 import dataclasses
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Self
+
+import orjson
 
 SIDECAR_VERSION = 1
 SIDECAR_SUFFIX = ".stillwarm.json"
@@ -90,17 +91,14 @@ class Sidecar:
         """Write sidecar as JSON atomically to the given path."""
         path = Path(path)
         tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(
-            json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        tmp.write_bytes(orjson.dumps(self.to_dict()))
         tmp.replace(path)
         return path
 
     @classmethod
     def read(cls, path: str | Path) -> Self:
         """Read and parse a sidecar JSON file."""
-        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+        return cls.from_dict(orjson.loads(Path(path).read_bytes()))
 
 
 class IncompatibleSidecarError(ValueError):

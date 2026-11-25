@@ -29,12 +29,13 @@ Design decisions (each grounded in measured llama.cpp behavior):
 
 import contextlib
 import hashlib
-import json
 import os
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
+
+import orjson
 
 from . import store as store_mod
 from .compat import REFUSE, ServerProfile, check, check_build
@@ -79,7 +80,8 @@ class AskResult:
 
 
 def _hash_tokens(tokens: list[int]) -> str:
-    return hashlib.sha256(json.dumps(tokens, separators=(",", ":")).encode()).hexdigest()
+    # orjson.dumps matches stdlib compact JSON for int lists.
+    return hashlib.sha256(orjson.dumps(tokens)).hexdigest()
 
 
 def _env_guard_ratio() -> float:
@@ -247,7 +249,7 @@ class Session:
             build_tag=self.server_build_tag,
             probe_hash=probe_hash,
             probe_n_predict=PROBE_N_PREDICT,
-            probe_sampler_json=json.dumps(PROBE_SAMPLER, sort_keys=True),
+            probe_sampler_json=orjson.dumps(PROBE_SAMPLER).decode(),
             save_point=save_point,
             save_file=binname,
             size_bytes=save["n_written"],
@@ -286,7 +288,7 @@ class Session:
                 sc.probe_n_predict or PROBE_N_PREDICT,
                 cache_prompt=True,
                 id_slot=self.id_slot,
-                sampler=json.loads(sc.probe_sampler_json or "null") or dict(PROBE_SAMPLER),
+                sampler=orjson.loads(sc.probe_sampler_json or "null") or dict(PROBE_SAMPLER),
             )
             got = _hash_tokens(cast("list[int]", probe.get("tokens") or []))
             verified = got == sc.probe_hash

@@ -12,4 +12,4 @@ repos:
         # project-checking mode: src/ and tests/ per [tool.pyrefly] in pyproject.toml
         pass_filenames: false
         # tests import pytest; pyrefly resolves it from this hook's environment
-        additional_dependencies: ["pytest>=8"]
+        additional_dependencies: ["pytest>=8", "httpx", "orjson"]

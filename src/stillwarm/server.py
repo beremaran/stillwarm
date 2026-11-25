@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Vimal Nakrani
 # Licensed under the MIT license.
 
-"""Thin llama-server HTTP client. Standard library only (zero-dep contract).
+"""Thin llama-server HTTP client.
 
 Covers exactly the endpoints stillwarm needs, with shapes verified against
 llama.cpp release b9871:
@@ -11,11 +11,9 @@ llama.cpp release b9871:
   POST /slots/{id}?action=save|restore|erase  {"filename": str}
 """
 
-import json
-import urllib.error
-import urllib.parse
-import urllib.request
 from typing import Any, cast
+
+import httpx
 
 
 class ServerError(RuntimeError):
@@ -53,29 +51,23 @@ class LlamaServer:
     def _request(
         self, method: str, path: str, payload: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        url = urllib.parse.urljoin(self.base_url, path)
-        scheme = urllib.parse.urlparse(url).scheme
-        if scheme not in ("http", "https"):
-            msg = f"URL must use http or https scheme: {url}"
-            raise ValueError(msg)
-        data = json.dumps(payload).encode("utf-8") if payload is not None else None
-        req = urllib.request.Request(
-            url,
-            data=data,
-            method=method,
-            headers={"Content-Type": "application/json"},
-        )
+        url = self.base_url + path
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                return dict(json.loads(resp.read().decode("utf-8") or "{}"))
-        except urllib.error.HTTPError as e:
-            raise ServerError(e.code, e.read().decode("utf-8", "replace")) from None
+            resp = httpx.request(
+                method,
+                url,
+                json=payload,
+                timeout=self.timeout,
+            )
+            return dict(resp.json() or {})
+        except httpx.HTTPStatusError as e:
+            raise ServerError(e.response.status_code, e.response.text) from None
 
     def health(self) -> bool:
         """Check if the server is responding."""
         try:
             self._request("GET", "/health")
-        except (ServerError, urllib.error.URLError):
+        except (ServerError, httpx.RequestError):
             return False
         else:
             return True

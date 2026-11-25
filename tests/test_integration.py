@@ -22,15 +22,14 @@ Run:
   docker compose -f docker-compose.integration.yml up --build --abort-on-container-exit test
 """
 
-import json
 import os
 import shutil
 import time
 import warnings
 from pathlib import Path
 from typing import Any
-from urllib.request import urlopen
 
+import httpx
 import pytest
 
 from stillwarm import (
@@ -97,9 +96,8 @@ QUESTION = "Question: What happens on Mondays?\nAnswer:"
 
 
 def _fetch_props(url: str) -> dict[str, Any]:
-    with urlopen(f"{url.rstrip('/')}/props", timeout=READY_TIMEOUT_S) as resp:
-        props: dict[str, Any] = json.loads(resp.read().decode("utf-8"))
-        return props
+    resp = httpx.get(f"{url.rstrip('/')}/props", timeout=READY_TIMEOUT_S)
+    return resp.json()  # type: ignore[no-any-return]
 
 
 @pytest.fixture(scope="module", autouse=True)
