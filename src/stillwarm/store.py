@@ -9,8 +9,6 @@ Pruning removes least-recently-USED sessions first (atime of use = bin mtime,
 updated on every save) and always removes the whole triple together.
 """
 
-from __future__ import annotations
-
 import time
 from pathlib import Path
 from typing import Any

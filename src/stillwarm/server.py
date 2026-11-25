@@ -11,8 +11,6 @@ llama.cpp release b9871:
   POST /slots/{id}?action=save|restore|erase  {"filename": str}
 """
 
-from __future__ import annotations
-
 import json
 import urllib.error
 import urllib.parse

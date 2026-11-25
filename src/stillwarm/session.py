@@ -27,8 +27,6 @@ Design decisions (each grounded in measured llama.cpp behavior):
     llama.cpp failure mode).
 """
 
-from __future__ import annotations
-
 import contextlib
 import hashlib
 import json

@@ -11,13 +11,9 @@ Verdicts reflect measured llama.cpp behavior:
 The decision is pure and side-effect free; callers act on it.
 """
 
-from __future__ import annotations
-
 import dataclasses
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from .sidecar import Sidecar
+from .sidecar import Sidecar
 
 REFUSE = "REFUSE"
 ADVISORY = "ADVISORY"
