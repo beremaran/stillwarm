@@ -5,10 +5,12 @@
 
 restore-before-request, save-after-response, against a running llama-server:
 
-    server  = LlamaServer("http://127.0.0.1:8080")
+    server  = LlamaServer("http://127.0.0.1:8080")  # or any reachable http(s) URL, remote included
     profile = ServerProfile(model_sha256=..., flash_attn="on", cache_type_k="f16",
                             cache_type_v="f16", swa_full=False, ctx_size=16384)
-    sw = Session(server, profile, cache_dir="~/.stillwarm", server_build_tag="b9871")
+    sw = Session(server, profile, cache_dir, server_build_tag="<your build tag>")
+    # cache_dir: any directory you choose; it must equal the directory you
+    # pass to llama-server's --slot-save-path. The library bakes in no default.
     reply = sw.ask("sess-1", document + question, n_predict=256)
     ... server restarts ...
     reply = sw.ask("sess-1", document + question2, n_predict=256)
@@ -30,6 +32,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +42,18 @@ from . import store as store_mod
 from .compat import REFUSE, ServerProfile, check, check_build
 from .server import DEFAULT_SAMPLER, PROBE_N_PREDICT, PROBE_SAMPLER, LlamaServer, ServerError
 from .sidecar import Sidecar, sidecar_path_for
+
+# Default generation length for ask() when the caller does not choose one.
+DEFAULT_N_PREDICT = 256
+
+# Silently-ineffective-restore guard: if the first request after a restore
+# re-prefills more than this fraction of the prompt — or more than this many
+# tokens, whichever is larger — the restore did not take. Measured detection
+# boundary (stillwarm-bench); override with the STILLWARM_GUARD_* env vars.
+_INEFFECTIVE_RATIO = 0.5
+_INEFFECTIVE_MIN_TOKENS = 64
+_ENV_GUARD_RATIO = "STILLWARM_GUARD_RATIO"
+_ENV_GUARD_MIN_TOKENS = "STILLWARM_GUARD_MIN_TOKENS"
 
 
 class RefusedRestoreError(RuntimeError):
@@ -69,6 +84,30 @@ def _hash_tokens(tokens: list[int]) -> str:
     return hashlib.sha256(json.dumps(tokens, separators=(",", ":")).encode()).hexdigest()
 
 
+def _env_guard_ratio() -> float:
+    """Guard ratio override from the environment, else the measured default."""
+    raw = os.environ.get(_ENV_GUARD_RATIO)
+    if raw is None:
+        return _INEFFECTIVE_RATIO
+    try:
+        return float(raw)
+    except ValueError:
+        msg = f"{_ENV_GUARD_RATIO}={raw!r} is not a valid float"
+        raise ValueError(msg) from None
+
+
+def _env_guard_min_tokens() -> int:
+    """Guard token floor from the environment, else the measured default."""
+    raw = os.environ.get(_ENV_GUARD_MIN_TOKENS)
+    if raw is None:
+        return _INEFFECTIVE_MIN_TOKENS
+    try:
+        return int(raw)
+    except ValueError:
+        msg = f"{_ENV_GUARD_MIN_TOKENS}={raw!r} is not a valid integer"
+        raise ValueError(msg) from None
+
+
 class Session:
     """Wrapper around llama-server that auto-restores and saves KV-cache sessions."""
 
@@ -94,6 +133,10 @@ class Session:
             verify: Whether to verify restores against probe hashes.
             id_slot: The llama-server slot ID to use.
 
+        The silently-ineffective guard thresholds (measured defaults) can be
+        overridden with the STILLWARM_GUARD_RATIO / STILLWARM_GUARD_MIN_TOKENS
+        environment variables; malformed values raise at construction.
+
         """
         self.server = server
         self.profile = profile
@@ -103,6 +146,8 @@ class Session:
         self.disk_budget_gb = disk_budget_gb
         self.verify = verify
         self.id_slot = id_slot
+        self._guard_ratio = _env_guard_ratio()
+        self._guard_min_tokens = _env_guard_min_tokens()
         self._live_prefix: dict[str, str] = {}
         self._loaded: str | None = None
 
@@ -123,7 +168,7 @@ class Session:
         self,
         session_id: str,
         full_prompt: str,
-        n_predict: int = 256,
+        n_predict: int = DEFAULT_N_PREDICT,
         *,
         sampler: dict[str, Any] | None = None,
         verify: bool | None = None,
@@ -281,7 +326,7 @@ class Session:
             full_tokens = len(self.server.tokenize(full_prompt))
         except ServerError:
             return ""
-        if prompt_n <= max(0.5 * full_tokens, 64):
+        if prompt_n <= max(self._guard_ratio * full_tokens, self._guard_min_tokens):
             return ""
         save_point = ""
         with contextlib.suppress(Exception):

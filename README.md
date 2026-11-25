@@ -28,8 +28,8 @@ page cache, restore wins for any document longer than ~300 tokens.
 ```python
 from stillwarm import LlamaServer, ServerProfile, Session
 
-# llama-server ... -fa on --slot-save-path ~/.stillwarm/   (must be running)
-server = LlamaServer("http://127.0.0.1:8080")
+# llama-server ... --flash-attn on --slot-save-path /path/to/cache   (must be running)
+server = LlamaServer("http://127.0.0.1:8080")  # any reachable http(s) URL works, remote included
 profile = ServerProfile(
     model_sha256="<sha256 of your .gguf>",
     flash_attn="on",
@@ -38,7 +38,13 @@ profile = ServerProfile(
     swa_full=False,
     ctx_size=16384,
 )
-sw = Session(server, profile, cache_dir="~/.stillwarm", server_build_tag="b9871", disk_budget_gb=50)
+sw = Session(
+    server,
+    profile,
+    cache_dir="/path/to/cache",
+    server_build_tag="<your llama-server's build tag>",
+    disk_budget_gb=50,
+)
 
 r = sw.ask("paper-review", document + "\n\nQ: Summarize.\nA:", n_predict=256)
 # ... llama-server restarts ...
@@ -46,15 +52,31 @@ r = sw.ask("paper-review", document + "\n\nQ: And the weaknesses?\nA:", n_predic
 print(r.restored, r.prompt_n)  # True, ~a few dozen tokens instead of thousands
 ```
 
-`cache_dir` must be the directory passed to `--slot-save-path`. Inspect and
-prune the cache through the `store` API:
+`cache_dir` must be the directory passed to `--slot-save-path` (stillwarm
+bakes in no default for it). Inspect and prune the cache through the `store`
+API:
 
 ```python
 from stillwarm import store
 
-store.sessions("~/.stillwarm")  # sessions, sizes, ages, sidecars
-store.prune("~/.stillwarm", 50.0, dry_run=True)
+store.sessions("/path/to/cache")  # sessions, sizes, ages, sidecars
+store.prune("/path/to/cache", 50.0, dry_run=True)
 ```
+
+## Remote servers
+
+`LlamaServer` accepts any reachable `http(s)` URL — a server on another host
+works as long as one physical condition holds: the KV save files live on the
+**server's** disk (its `--slot-save-path`), and stillwarm reads the sidecar
+next to each save file before it will restore it. So `cache_dir` must point
+at that same directory:
+
+- local server — `cache_dir` is the `--slot-save-path` directory;
+- remote server — the `--slot-save-path` directory must be mounted into your
+  process (NFS, EFS, a shared volume).
+
+If your process cannot read the server's save directory, there is nothing to
+restore — and `store`/`prune` cannot see the files either.
 
 ## Compatibility contract
 
@@ -94,7 +116,8 @@ Cost: ~2x restore time + one 64-token decode (~1.5 s for an 8B model).
 
 ## Non-goals
 
-- **Not a serving framework** — one machine, one llama-server.
+- **Not a serving framework** — one client talks to one llama-server
+  (remote servers work; see Remote servers).
 - **No multi-machine cache sharing**; no vLLM (LMCache owns that space).
 - **llama-server only**: Ollama and LM Studio do not expose the slot
   save/restore endpoints this needs.
@@ -113,9 +136,24 @@ Small and finished beats large and abandoned.
 
 ## Tests
 
-`pytest` — unit tests run anywhere; integration tests need a `llama-server`
-binary and a tiny GGUF (defaults: SmolLM2-135M-Instruct Q8_0, ~145 MB; override
-via `STILLWARM_TEST_SERVER_BIN` / `STILLWARM_TEST_MODEL`; they skip if absent).
+`pytest` — unit tests run anywhere. Integration tests need real
+`llama-server` processes; Docker Compose provides them (four servers sharing
+one save volume, including a fresh-process twin that plays "the server
+restarted"):
+
+```sh
+# one-time prerequisite: the test model (~145 MB) into your Hugging Face cache
+hf download bartowski/SmolLM2-135M-Instruct-GGUF \
+    --include "SmolLM2-135M-Instruct-Q8_0.gguf"
+
+docker compose -f docker-compose.integration.yml up --build --abort-on-container-exit test
+docker compose -f docker-compose.integration.yml down -v   # wipes the save volume
+```
+
+The model is read from your Hugging Face cache
+(`${HF_HOME:-$HOME/.cache/huggingface}`) mounted read-only; the llama.cpp
+image is the rolling `ghcr.io/ggml-org/llama.cpp:server`. Without Docker the
+integration tests skip, naming this command in the skip reason.
 
 ## License
 

@@ -27,19 +27,28 @@ class ServerError(RuntimeError):
         """Initialize with HTTP status code and response body."""
         self.status = status
         self.body = body
-        super().__init__(f"llama-server HTTP {status}: {body[:300]}")
+        super().__init__(f"llama-server HTTP {status}: {body[:_MAX_ERROR_BODY]}")
 
 
-PROBE_SAMPLER: dict[str, Any] = {"temperature": 0, "top_k": 1, "seed": 42, "ignore_eos": True}
+# Greedy sampling (temperature 0, top_k 1) is deterministic on its own, so no
+# seed is needed or recorded: these samplers are fully specified by the other
+# fields.
+PROBE_SAMPLER: dict[str, Any] = {"temperature": 0, "top_k": 1, "ignore_eos": True}
 PROBE_N_PREDICT = 64
-DEFAULT_SAMPLER: dict[str, Any] = {"temperature": 0, "top_k": 1, "seed": 42}
+DEFAULT_SAMPLER: dict[str, Any] = {"temperature": 0, "top_k": 1}
+
+DEFAULT_TIMEOUT_S = 600.0
+_MAX_ERROR_BODY = 300
 
 
 class LlamaServer:
     """HTTP client for llama-server slot save/restore endpoints."""
 
-    def __init__(self, base_url: str = "http://127.0.0.1:8080", timeout: float = 600.0) -> None:
-        """Initialize with server base URL and request timeout."""
+    def __init__(self, base_url: str, timeout: float = DEFAULT_TIMEOUT_S) -> None:
+        """Initialize with the server's base URL and request timeout.
+
+        base_url may be any reachable http(s) URL, local or remote.
+        """
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 

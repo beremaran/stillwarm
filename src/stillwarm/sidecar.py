@@ -50,6 +50,8 @@ class Sidecar:
 
     probe_hash: str = ""
     probe_n_predict: int = 0
+    # Per-save sampler record: restore() re-runs the probe with it, so changing
+    # PROBE_SAMPLER never affects existing saves.
     probe_sampler_json: str = ""
     save_point: str = "doc_prefill"
     save_file: str = ""

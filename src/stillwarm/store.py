@@ -17,6 +17,9 @@ from typing import Any
 
 from .sidecar import Sidecar, sidecar_path_for
 
+_SECONDS_PER_HOUR = 3600
+_BYTES_PER_GB = 10**9
+
 
 def _triple(bin_path: Path) -> list[Path]:
     return [
@@ -38,7 +41,7 @@ def sessions(cache_dir: str) -> list[dict[str, Any]]:
             "bin": str(bin_path),
             "bytes": bin_path.stat().st_size,
             "mtime": bin_path.stat().st_mtime,
-            "age_hours": round((time.time() - bin_path.stat().st_mtime) / 3600, 2),
+            "age_hours": round((time.time() - bin_path.stat().st_mtime) / _SECONDS_PER_HOUR, 2),
             "sidecar": None,
         }
         sc_path = sidecar_path_for(bin_path)
@@ -59,7 +62,7 @@ def prune(cache_dir: str, budget_gb: float, *, dry_run: bool = False) -> dict[st
     unlink. A locked session is SKIPPED (reported, not fatal) and pruning moves
     on to the next-oldest candidate.
     """
-    budget = int(budget_gb * 10**9)
+    budget = int(budget_gb * _BYTES_PER_GB)
     recs = sessions(cache_dir)
     total = sum(r["bytes"] for r in recs)
     removed, skipped_locked = [], []
