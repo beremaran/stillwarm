@@ -659,9 +659,10 @@ def build_app(
     """Build the proxy app; verify the upstream first.
 
     GET /props is fetched at startup: unreachable is a hard error, and
-    build_info becomes the sidecar build tag while n_ctx (when
-    cfg.ctx_size is 0) becomes the profile's ctx size. total_slots != 1
-    only warns: the proxy assumes one slot and clobbers it by design.
+    build_info becomes the sidecar build tag while
+    default_generation_settings.n_ctx (when cfg.ctx_size is 0) becomes the
+    profile's ctx size. total_slots != 1 only warns: the proxy assumes one
+    slot and clobbers it by design.
     """
     if cfg.flash_attn not in ("on", "off"):
         msg = (
@@ -680,7 +681,11 @@ def build_app(
         )
     ctx_size = cfg.ctx_size
     if ctx_size <= 0:
-        n_ctx = props.get("n_ctx")
+        # b9871: /props exposes the slot ctx size nested under
+        # default_generation_settings.n_ctx (measured: the per-slot size;
+        # equals --ctx-size on a --parallel 1 server).
+        dgs = props.get("default_generation_settings")
+        n_ctx = dgs.get("n_ctx") if isinstance(dgs, dict) else None
         if isinstance(n_ctx, int) and n_ctx > 0:
             ctx_size = n_ctx
     if ctx_size <= 0:

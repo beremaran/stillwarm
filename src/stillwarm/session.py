@@ -387,6 +387,7 @@ class Session:
             probe_hash=probe_hash,
             probe_n_predict=PROBE_N_PREDICT if probe_body is not None else 0,
             probe_sampler_json=probe_sampler_json,
+            probe_kind="chat",
             save_point=save_point,
             save_file=binname,
             size_bytes=save["n_written"],
@@ -412,7 +413,11 @@ class Session:
         """Restore a saved session into the server slot.
 
         If verify=True, regenerates the probe and compares against the
-        save-time probe hash before re-restoring. An unprobed sidecar (empty
+        save-time probe hash before re-restoring. The probe is replayed the
+        way it was recorded (sidecar probe_kind): "chat" saves re-POST the
+        pinned chat request from .prefix.txt via /v1/chat/completions and
+        hash choices[0].message; "completion" saves feed the raw prefix text
+        to /completion and hash the tokens. An unprobed sidecar (empty
         probe_hash, written by save_chat with probe_body=None) short-circuits:
         no probe is sent and the return value stays None — nothing to verify.
         """
@@ -431,16 +436,31 @@ class Session:
         verified: bool | None = None
 
         if verify and sc.probe_hash:
-            # Cost: ~2x restore, plus a 64-token decode (~1.5 s for an 8B model).
-            prefix = self._prefix_path(session_id).read_text(encoding="utf-8")
-            probe = self.server.completion(
-                prefix,
-                sc.probe_n_predict or PROBE_N_PREDICT,
-                cache_prompt=True,
-                id_slot=self.id_slot,
-                sampler=orjson.loads(sc.probe_sampler_json or "null") or dict(PROBE_SAMPLER),
-            )
-            got = _hash_tokens(cast("list[int]", probe.get("tokens") or []))
+            prefix_path = self._prefix_path(session_id)
+            if sc.probe_kind == "chat":
+                # Cost: one pinned chat request against the restored state.
+                # Replays .prefix.txt exactly as save_chat wrote it — the pinned
+                # sampler fields are already in the body.
+                probe_input = cast(
+                    "dict[str, Any]",
+                    orjson.loads(prefix_path.read_bytes() or b"{}"),
+                )
+                probe_input.setdefault("id_slot", self.id_slot)
+                probe = self.server.chat(probe_input, timeout=CHAT_PROBE_TIMEOUT_S)
+                message = cast("list[Any]", probe.get("choices") or [{}])[0].get("message")
+                canonical = orjson.dumps(message, option=orjson.OPT_SORT_KEYS)
+                got = hashlib.sha256(canonical).hexdigest()
+            else:
+                # Cost: ~2x restore, plus a 64-token decode (~1.5 s for an 8B model).
+                prefix = prefix_path.read_text(encoding="utf-8")
+                probe = self.server.completion(
+                    prefix,
+                    sc.probe_n_predict or PROBE_N_PREDICT,
+                    cache_prompt=True,
+                    id_slot=self.id_slot,
+                    sampler=orjson.loads(sc.probe_sampler_json or "null") or dict(PROBE_SAMPLER),
+                )
+                got = _hash_tokens(cast("list[int]", probe.get("tokens") or []))
             verified = got == sc.probe_hash
             self.server.slot_erase(self.id_slot)
             self.server.slot_restore(binname, self.id_slot)

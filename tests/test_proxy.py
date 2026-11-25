@@ -143,7 +143,13 @@ def _make_upstream(  # noqa: PLR0913 — one knob per upstream behavior under te
         if path == "/props":
             return _upstream_response(
                 200,
-                orjson.dumps({"build_info": "b9871", "total_slots": 1, "n_ctx": 4096}),
+                orjson.dumps(
+                    {
+                        "build_info": "b9871",
+                        "total_slots": 1,
+                        "default_generation_settings": {"n_ctx": 4096},
+                    }
+                ),
                 "application/json",
             )
         if path == CHAT_URL:
@@ -458,7 +464,7 @@ def test_passthrough_paths_verbatim(tmp_path: Path) -> None:
         assert props.json() == {
             "build_info": "b9871",
             "total_slots": 1,
-            "n_ctx": 4096,
+            "default_generation_settings": {"n_ctx": 4096},
         }
         assert "x-stillwarm-restore" not in props.headers
         assert comp.status_code == 200
@@ -831,7 +837,12 @@ def test_build_app_warns_on_multi_slot(tmp_path: Path, caplog: pytest.LogCapture
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/props":
             return httpx.Response(
-                200, json={"build_info": "b9871", "total_slots": 2, "n_ctx": 4096}
+                200,
+                json={
+                    "build_info": "b9871",
+                    "total_slots": 2,
+                    "default_generation_settings": {"n_ctx": 4096},
+                },
             )
         return httpx.Response(404, json={})
 

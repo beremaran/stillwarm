@@ -1,6 +1,17 @@
-# Integration test harness: four real llama-server containers (rolling
-# ghcr.io/ggml-org/llama.cpp:server) sharing one save volume, plus a test
-# container that runs the integration suite against them over HTTP.
+# Integration test harness: four real llama-server containers sharing one
+# save volume, four `stillwarm proxy` containers (one per upstream, the
+# proxy's design contract), and a test container that runs the integration
+# suite against everything over HTTP.
+#
+# The servers are pinned to ghcr.io/ggml-org/llama.cpp:server-b9870. Every
+# behavior claim in this repo is measured against llama.cpp b9871, and
+# b9871 itself was never published as a GHCR image (llama.cpp CI rebuilds
+# daily and only the master tip of that day gets a versioned tag); b9870 is
+# the closest retained release (the parent commit), and the behaviors the
+# suite asserts (/props shape with the slot n_ctx nested under
+# default_generation_settings, the over-context error, slot save/restore)
+# were re-verified against it. A rolling image would break the suite
+# whenever upstream changes a schema.
 #
 # One-time prerequisite on the host — the test model, read from your
 # Hugging Face cache and mounted read-only:
@@ -12,13 +23,18 @@
 #
 #   docker compose -f docker-compose.integration.yml up --build --abort-on-container-exit test
 #   docker compose -f docker-compose.integration.yml down -v   # wipes the save volume
+#
+# The proxy containers wait for their upstream's GET /props before exec'ing
+# the proxy: the proxy hard-errors at startup when the upstream is not yet
+# answering (design choice), and depends_on alone only waits for the
+# container to start, not for the model to load.
 
 name: stillwarm-integration
 
 services:
   # ctx 1024, flash-attn on — the primary server.
   server-primary:
-    image: ghcr.io/ggml-org/llama.cpp:server
+    image: ghcr.io/ggml-org/llama.cpp:server-b9870
     entrypoint: ["/bin/sh", "-c"]
     command:
       - 'exec /app/llama-server -m "$(find /hf -name SmolLM2-135M-Instruct-Q8_0.gguf -print -quit)" --ctx-size 1024 --flash-attn on --parallel 1 --slot-save-path /saves'
@@ -31,7 +47,7 @@ services:
 
   # Same configuration, fresh process: plays "the server restarted".
   server-twin:
-    image: ghcr.io/ggml-org/llama.cpp:server
+    image: ghcr.io/ggml-org/llama.cpp:server-b9870
     entrypoint: ["/bin/sh", "-c"]
     command:
       - 'exec /app/llama-server -m "$(find /hf -name SmolLM2-135M-Instruct-Q8_0.gguf -print -quit)" --ctx-size 1024 --flash-attn on --parallel 1 --slot-save-path /saves'
@@ -44,7 +60,7 @@ services:
 
   # ctx 1024, flash-attn off — the REFUSE(fa) restore target.
   server-fa-off:
-    image: ghcr.io/ggml-org/llama.cpp:server
+    image: ghcr.io/ggml-org/llama.cpp:server-b9870
     entrypoint: ["/bin/sh", "-c"]
     command:
       - 'exec /app/llama-server -m "$(find /hf -name SmolLM2-135M-Instruct-Q8_0.gguf -print -quit)" --ctx-size 1024 --flash-attn off --parallel 1 --slot-save-path /saves'
@@ -57,7 +73,7 @@ services:
 
   # ctx 256, flash-attn on — the REFUSE(ctx-fit) restore target.
   server-small-ctx:
-    image: ghcr.io/ggml-org/llama.cpp:server
+    image: ghcr.io/ggml-org/llama.cpp:server-b9870
     entrypoint: ["/bin/sh", "-c"]
     command:
       - 'exec /app/llama-server -m "$(find /hf -name SmolLM2-135M-Instruct-Q8_0.gguf -print -quit)" --ctx-size 256 --flash-attn on --parallel 1 --slot-save-path /saves'
@@ -66,6 +82,95 @@ services:
       - LLAMA_ARG_PORT=8083
     volumes:
       - ${HF_HOME:-$HOME/.cache/huggingface}:/hf:ro
+      - saves:/saves
+
+  # --- stillwarm proxy, one per upstream (the design contract) --------------
+  #
+  # The ctx size is deliberately NOT pinned here: the proxy takes it from the
+  # upstream's GET /props at startup, which this suite thus exercises.
+
+  proxy-primary:
+    build:
+      context: .
+      dockerfile: Dockerfile.integration
+    depends_on:
+      - server-primary
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "until uv run python -c \"import json,urllib.request;d=json.load(urllib.request.urlopen('http://server-primary:8080/props',timeout=2));exit(0 if d.get('build_info') else 1)\" 2>/dev/null; do sleep 1; done; exec uv run stillwarm proxy --cache-dir /saves"
+    environment:
+      STILLWARM_BASE_URL: http://server-primary:8080
+      STILLWARM_CACHE_DIR: /saves
+      STILLWARM_HOST: 0.0.0.0
+      STILLWARM_PORT: "8180"
+      STILLWARM_MODEL_SHA256: "5a1395716f7913741cc51d98581b9b1228d80987a9f7d3664106742eb06bba83"
+      STILLWARM_FLASH_ATTN: "on"
+      STILLWARM_CACHE_TYPE_K: "f16"
+      STILLWARM_CACHE_TYPE_V: "f16"
+    volumes:
+      - saves:/saves
+
+  proxy-twin:
+    build:
+      context: .
+      dockerfile: Dockerfile.integration
+    depends_on:
+      - server-twin
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "until uv run python -c \"import json,urllib.request;d=json.load(urllib.request.urlopen('http://server-twin:8081/props',timeout=2));exit(0 if d.get('build_info') else 1)\" 2>/dev/null; do sleep 1; done; exec uv run stillwarm proxy --cache-dir /saves"
+    environment:
+      STILLWARM_BASE_URL: http://server-twin:8081
+      STILLWARM_CACHE_DIR: /saves
+      STILLWARM_HOST: 0.0.0.0
+      STILLWARM_PORT: "8181"
+      STILLWARM_MODEL_SHA256: "5a1395716f7913741cc51d98581b9b1228d80987a9f7d3664106742eb06bba83"
+      STILLWARM_FLASH_ATTN: "on"
+      STILLWARM_CACHE_TYPE_K: "f16"
+      STILLWARM_CACHE_TYPE_V: "f16"
+    volumes:
+      - saves:/saves
+
+  proxy-fa-off:
+    build:
+      context: .
+      dockerfile: Dockerfile.integration
+    depends_on:
+      - server-fa-off
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "until uv run python -c \"import json,urllib.request;d=json.load(urllib.request.urlopen('http://server-fa-off:8082/props',timeout=2));exit(0 if d.get('build_info') else 1)\" 2>/dev/null; do sleep 1; done; exec uv run stillwarm proxy --cache-dir /saves"
+    environment:
+      STILLWARM_BASE_URL: http://server-fa-off:8082
+      STILLWARM_CACHE_DIR: /saves
+      STILLWARM_HOST: 0.0.0.0
+      STILLWARM_PORT: "8182"
+      STILLWARM_MODEL_SHA256: "5a1395716f7913741cc51d98581b9b1228d80987a9f7d3664106742eb06bba83"
+      STILLWARM_FLASH_ATTN: "off"
+      STILLWARM_CACHE_TYPE_K: "f16"
+      STILLWARM_CACHE_TYPE_V: "f16"
+    volumes:
+      - saves:/saves
+
+  proxy-small-ctx:
+    build:
+      context: .
+      dockerfile: Dockerfile.integration
+    depends_on:
+      - server-small-ctx
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "until uv run python -c \"import json,urllib.request;d=json.load(urllib.request.urlopen('http://server-small-ctx:8083/props',timeout=2));exit(0 if d.get('build_info') else 1)\" 2>/dev/null; do sleep 1; done; exec uv run stillwarm proxy --cache-dir /saves"
+    environment:
+      STILLWARM_BASE_URL: http://server-small-ctx:8083
+      STILLWARM_CACHE_DIR: /saves
+      STILLWARM_HOST: 0.0.0.0
+      STILLWARM_PORT: "8183"
+      STILLWARM_MODEL_SHA256: "5a1395716f7913741cc51d98581b9b1228d80987a9f7d3664106742eb06bba83"
+      STILLWARM_FLASH_ATTN: "on"
+      STILLWARM_CACHE_TYPE_K: "f16"
+      STILLWARM_CACHE_TYPE_V: "f16"
+    volumes:
       - saves:/saves
 
   test:
@@ -77,11 +182,19 @@ services:
       - server-twin
       - server-fa-off
       - server-small-ctx
+      - proxy-primary
+      - proxy-twin
+      - proxy-fa-off
+      - proxy-small-ctx
     environment:
       STILLWARM_TEST_URL_PRIMARY: http://server-primary:8080
       STILLWARM_TEST_URL_TWIN: http://server-twin:8081
       STILLWARM_TEST_URL_FA_OFF: http://server-fa-off:8082
       STILLWARM_TEST_URL_SMALL_CTX: http://server-small-ctx:8083
+      STILLWARM_TEST_PROXY_PRIMARY: http://proxy-primary:8180
+      STILLWARM_TEST_PROXY_TWIN: http://proxy-twin:8181
+      STILLWARM_TEST_PROXY_FA_OFF: http://proxy-fa-off:8182
+      STILLWARM_TEST_PROXY_SMALL_CTX: http://proxy-small-ctx:8183
       STILLWARM_TEST_CACHE_DIR: /saves
     volumes:
       - saves:/saves

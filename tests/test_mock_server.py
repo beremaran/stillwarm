@@ -19,6 +19,7 @@ from stillwarm import (
     ServerError,
     ServerProfile,
     Session,
+    VerifyFailedError,
     chat_probe_body,
 )
 from stillwarm.settings import Settings
@@ -50,12 +51,16 @@ def make_mock_server(record: dict[str, Any] | None = None) -> LlamaServer:  # no
             note("health")
             return httpx.Response(200, json={"status": "ok"})
 
-        # Match props endpoint.
+        # Match props endpoint (b9871 shape: slot n_ctx is nested).
         if method == "GET" and path == "/props":
             note("props")
             return httpx.Response(
                 200,
-                json={"build_info": "b9871", "total_slots": 1, "n_ctx": 4096},
+                json={
+                    "build_info": "b9871",
+                    "total_slots": 1,
+                    "default_generation_settings": {"n_ctx": 4096},
+                },
             )
 
         # Match save endpoint.
@@ -400,3 +405,56 @@ def test_save_chat_probe_failure_deletes_triple(tmp_path: Path) -> None:
     assert not (tmp_path / "csess.bin").exists()
     assert not (tmp_path / "csess.bin.stillwarm.json").exists()
     assert not (tmp_path / "csess.prefix.txt").exists()
+
+
+def test_save_chat_records_probe_kind_chat(tmp_path: Path) -> None:
+    """save_chat marks the sidecar probe_kind='chat' for a chat-aware verify."""
+    sw = _chat_session(make_mock_server(), str(tmp_path))
+
+    sidecar = sw.save_chat("chat-sess", _sample_chat_body(), generated_tokens=13)
+
+    assert sidecar.probe_kind == "chat"
+
+
+def test_restore_verify_replays_chat_probe(tmp_path: Path) -> None:
+    """restore(verify=True) on a chat save re-POSTs /v1/chat/completions, never /completion."""
+    record: dict[str, Any] = {}
+    sw = _chat_session(make_mock_server(record), str(tmp_path))
+    sw.save_chat("chat-sess", _sample_chat_body(), generated_tokens=13)
+    record["calls"].clear()
+
+    verified = sw.restore("chat-sess", verify=True)
+
+    assert verified is True
+    assert "chat" in record["calls"]
+    assert "completion" not in record["calls"]
+    # The replayed request is byte-identical to the saved pinned probe.
+    saved_prefix = json.loads((tmp_path / "chat-sess.prefix.txt").read_bytes())
+    assert record["chat_requests"][0] == saved_prefix
+    # Probe, then erase+restore again so the slot holds the pre-probe state.
+    assert record["calls"] == [
+        "slots:erase",
+        "slots:restore",
+        "chat",
+        "slots:erase",
+        "slots:restore",
+    ]
+
+
+def test_restore_verify_chat_mismatch_raises(tmp_path: Path) -> None:
+    """A chat save whose continuation no longer reproduces fails verify."""
+    record: dict[str, Any] = {}
+    sw = _chat_session(make_mock_server(record), str(tmp_path))
+    sw.save_chat("chat-sess", _sample_chat_body(), generated_tokens=13)
+
+    # Simulate non-reproduction: the stored hash no longer matches.
+    sidecar_path = tmp_path / "chat-sess.bin.stillwarm.json"
+    data = json.loads(sidecar_path.read_text())
+    data["probe_hash"] = "0" * 64
+    sidecar_path.write_text(json.dumps(data))
+
+    with pytest.raises(VerifyFailedError, match="determinism probe"):
+        sw.restore("chat-sess", verify=True)
+
+    # The /completion endpoint was never touched by the chat probe path.
+    assert "completion" not in record["calls"]

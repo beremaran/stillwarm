@@ -19,6 +19,11 @@ llama.cpp behavior):
     TIME. `verify` regenerates the probe after a restore and compares
     against THIS hash — a determinism check, deliberately NOT cold-equivalence
     (which measurably fails for quantized caches without any corruption).
+  - probe_kind: which endpoint verify replays the probe against — "completion"
+    (the legacy raw-text /completion probe) or "chat" (the proxy's pinned
+    chat request, replayed via /v1/chat/completions and hashed on
+    choices[0].message). Defaults to "completion" for sidecars written
+    before the field existed.
 """
 
 import dataclasses
@@ -52,6 +57,8 @@ class Sidecar:
     # Per-save sampler record: restore() re-runs the probe with it, so changing
     # PROBE_SAMPLER never affects existing saves.
     probe_sampler_json: str = ""
+    # Which endpoint verify replays the probe against (see module docstring).
+    probe_kind: str = "completion"
     save_point: str = "doc_prefill"
     save_file: str = ""
     size_bytes: int = 0
@@ -65,6 +72,11 @@ class Sidecar:
                 f"flash_attn must be resolved to 'on' or 'off' before saving "
                 f"(got {self.flash_attn!r}); 'auto' would make the compat check meaningless"
             )
+            raise ValueError(
+                msg,
+            )
+        if self.probe_kind not in ("completion", "chat"):
+            msg = f"probe_kind must be 'completion' or 'chat' (got {self.probe_kind!r})"
             raise ValueError(
                 msg,
             )

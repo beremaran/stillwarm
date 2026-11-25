@@ -2,12 +2,16 @@
 
 Covers the measured Block-D taxonomy end-to-end: WORKS, REFUSE(fa),
 REFUSE(ctx-fit), ADVISORY(build), verify-pass, verify-mismatch (corrupted
-copy), and the SILENTLY-INEFFECTIVE guard path.
+copy), and the SILENTLY-INEFFECTIVE guard path. Plus the `stillwarm proxy`
+middleware: cold first turn, multi-turn restore with tail-only prefill,
+chat-probe reproduction across a fresh process, refused restores (fa and
+ctx-fit), byte-identical passthrough, and header vs derived session ids.
 
-The servers are provided by docker-compose.integration.yml: four
-llama-server containers sharing one save volume. The "twin" is a fresh
-process that plays "the server restarted". The test container talks to the
-servers over HTTP only and never touches the docker daemon.
+The servers and proxies are provided by docker-compose.integration.yml:
+four llama-server containers and four stillwarm-proxy containers (one per
+upstream, the proxy's design contract) sharing one save volume. The "twin"
+is a fresh process that plays "the server restarted". The test container
+talks to everything over HTTP only and never touches the docker daemon.
 
 Environment (all required; the module skips with the run command if any is
 missing):
@@ -15,8 +19,13 @@ missing):
   STILLWARM_TEST_URL_TWIN       ctx 1024, flash-attn on, fresh process
   STILLWARM_TEST_URL_FA_OFF     ctx 1024, flash-attn off
   STILLWARM_TEST_URL_SMALL_CTX  ctx 256, flash-attn on
+  STILLWARM_TEST_PROXY_PRIMARY  stillwarm proxy in front of the primary
+  STILLWARM_TEST_PROXY_TWIN     stillwarm proxy in front of the twin
+  STILLWARM_TEST_PROXY_FA_OFF   stillwarm proxy in front of fa-off
+  STILLWARM_TEST_PROXY_SMALL_CTX stillwarm proxy in front of small-ctx
   STILLWARM_TEST_CACHE_DIR      directory shared with the servers'
-                                --slot-save-path
+                                --slot-save-path and the proxies'
+                                --cache-dir
 
 Run:
   docker compose -f docker-compose.integration.yml up --build --abort-on-container-exit test
@@ -41,6 +50,7 @@ from stillwarm import (
     Session,
     VerifyFailedError,
 )
+from stillwarm.proxy import derived_session_id
 from stillwarm.sidecar import Sidecar, sidecar_path_for
 
 
@@ -57,6 +67,10 @@ class _IntegrationSettings(BaseSettings):
     url_twin: str = ""
     url_fa_off: str = ""
     url_small_ctx: str = ""
+    proxy_primary: str = ""
+    proxy_twin: str = ""
+    proxy_fa_off: str = ""
+    proxy_small_ctx: str = ""
     cache_dir: str = ""
 
 
@@ -65,6 +79,10 @@ URL_PRIMARY = ts.url_primary
 URL_TWIN = ts.url_twin
 URL_FA_OFF = ts.url_fa_off
 URL_SMALL_CTX = ts.url_small_ctx
+PROXY_PRIMARY = ts.proxy_primary
+PROXY_TWIN = ts.proxy_twin
+PROXY_FA_OFF = ts.proxy_fa_off
+PROXY_SMALL_CTX = ts.proxy_small_ctx
 CACHE_DIR = ts.cache_dir
 
 # sha256 of the model the compose file globs from the Hugging Face cache
@@ -91,16 +109,38 @@ BOS_SLACK = 2
 READY_TIMEOUT_S = 30.0
 READY_POLL_S = 0.5
 _BYTES_PER_GB = 1e9
+# Per-chat-request client timeout for the proxy tests (the 135M model is fast;
+# the probe adds a 64-token decode per save).
+CHAT_TIMEOUT_S = 60.0
+# Fraction of the saved tokens the server must report as cached after a
+# restored turn, to count as a real reuse (a full re-prefill reports ~0).
+RESTORE_REUSE_FRACTION = 0.75
+# How long to wait for a proxy's post-response save (slot_save, then the
+# 64-token chat probe, then the triple write) to land in the shared volume.
+SAVE_TIMEOUT_S = 60.0
 
 RUN_COMMAND = (
     "docker compose -f docker-compose.integration.yml up --build --abort-on-container-exit test"
 )
 
 pytestmark = pytest.mark.skipif(
-    not all((URL_PRIMARY, URL_TWIN, URL_FA_OFF, URL_SMALL_CTX, CACHE_DIR)),
+    not all(
+        (
+            URL_PRIMARY,
+            URL_TWIN,
+            URL_FA_OFF,
+            URL_SMALL_CTX,
+            PROXY_PRIMARY,
+            PROXY_TWIN,
+            PROXY_FA_OFF,
+            PROXY_SMALL_CTX,
+            CACHE_DIR,
+        )
+    ),
     reason=(
         "integration servers not configured; run "
-        f"{RUN_COMMAND} (it sets STILLWARM_TEST_URL_*/STILLWARM_TEST_CACHE_DIR)"
+        f"{RUN_COMMAND} (it sets STILLWARM_TEST_URL_*/STILLWARM_TEST_PROXY_*/"
+        "STILLWARM_TEST_CACHE_DIR)"
     ),
 )
 
@@ -121,7 +161,10 @@ def _fetch_props(url: str) -> dict[str, Any]:
 @pytest.fixture(scope="module", autouse=True)
 def wait_for_servers() -> None:
     """Compose starts the servers before this container, but model load takes
-    a few seconds; wait until every server answers /health."""
+    a few seconds; wait until every server answers /health. The proxies wait
+    for their upstream's /props before exec'ing (see the compose file), so
+    /health through a proxy only answers once BOTH are up — wait for those
+    too."""
     for url in (URL_PRIMARY, URL_TWIN, URL_FA_OFF, URL_SMALL_CTX):
         api = LlamaServer(url)
         deadline = time.monotonic() + READY_TIMEOUT_S
@@ -130,6 +173,23 @@ def wait_for_servers() -> None:
                 msg = (
                     f"llama-server at {url} not ready after {READY_TIMEOUT_S:g}s; inspect it "
                     "with: docker compose -f docker-compose.integration.yml logs"
+                )
+                raise TimeoutError(msg)
+            time.sleep(READY_POLL_S)
+    for url in (PROXY_PRIMARY, PROXY_TWIN, PROXY_FA_OFF, PROXY_SMALL_CTX):
+        deadline = time.monotonic() + READY_TIMEOUT_S
+        while True:
+            try:
+                resp = httpx.get(f"{url.rstrip('/')}/health", timeout=READY_POLL_S)
+                ready = resp.status_code == 200
+            except httpx.RequestError:
+                ready = False
+            if ready:
+                break
+            if time.monotonic() >= deadline:
+                msg = (
+                    f"stillwarm proxy at {url} not ready after {READY_TIMEOUT_S:g}s; inspect it "
+                    "with: docker compose -f docker-compose.integration.yml logs proxy-primary"
                 )
                 raise TimeoutError(msg)
             time.sleep(READY_POLL_S)
@@ -404,3 +464,328 @@ def test_guard_message_mentions_after_generation(
         warnings.simplefilter("always")
         r = sw2.ask("s1", other, n_predict=8)
     assert "save_point=after_generation" in r.warning
+
+
+# --- The proxy middleware (stillwarm proxy) ----------------------------------
+#
+# One proxy per upstream (compose), all reading the shared save volume. The
+# per-test cache_dir wipe is the same isolation the library tests use: the
+# proxies hold nothing in-process across requests. The bad-id test runs
+# first: it asserts an empty volume, and every chat test ends with an
+# in-flight save (the proxy saves after the response).
+
+
+def _chat_body(messages: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
+    """A pinned-sampler chat body: short, deterministic, non-streaming."""
+    body: dict[str, Any] = {
+        "model": "smollm",
+        "messages": messages,
+        "max_tokens": 16,
+        "temperature": 0,
+        "top_k": 1,
+    }
+    body.update(extra)
+    return body
+
+
+def _proxy_chat(url: str, body: dict[str, Any], *, session_id: str | None = None) -> httpx.Response:
+    """POST a chat request through a proxy; optional explicit session header."""
+    headers = {"X-Stillwarm-Session": session_id} if session_id else {}
+    url_full = f"{url}/v1/chat/completions"
+    return httpx.post(url_full, json=body, headers=headers, timeout=CHAT_TIMEOUT_S)
+
+
+def _sidecar_mtime_ns(base: Path, session_id: str) -> int | None:
+    """The session's sidecar mtime, or None if the triple is not there yet."""
+    sc_path = sidecar_path_for(base / f"{session_id}.bin")
+    try:
+        return sc_path.stat().st_mtime_ns
+    except FileNotFoundError:
+        return None
+
+
+def _wait_for_triple(
+    base: Path,
+    session_id: str,
+    *,
+    newer_than_ns: int | None = None,
+    timeout: float = SAVE_TIMEOUT_S,
+) -> Sidecar:
+    """The proxy saves AFTER the response (slot_save -> chat probe -> triple
+    write), so the triple is not guaranteed to have landed when the response
+    returns. Wait for it (or, with newer_than_ns, for a rewrite of it) and
+    return the sidecar."""
+    bin_path = base / f"{session_id}.bin"
+    sc_path = sidecar_path_for(bin_path)
+    prefix_path = base / f"{session_id}.prefix.txt"
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            mtime_ns = sc_path.stat().st_mtime_ns
+            landed = bin_path.exists() and prefix_path.exists() and mtime_ns > (newer_than_ns or 0)
+        except FileNotFoundError:
+            landed = False  # a failed save rolls the triple back: keep waiting
+        if landed:
+            return Sidecar.read(sc_path)
+        if time.monotonic() >= deadline:
+            msg = (
+                f"triple for session {session_id!r} did not land within {timeout:g}s; "
+                "inspect it with: docker compose -f docker-compose.integration.yml logs"
+            )
+            raise TimeoutError(msg)
+        time.sleep(READY_POLL_S)
+
+
+SYSTEM = "You are a lamp keeper of the Quiet Order. Answer in one short sentence."
+
+
+def test_proxy_rejects_bad_session_ids(cache_dir: Path) -> None:
+    """Session ids become filenames: anything outside [A-Za-z0-9._-]{1,64} is
+    a 400 from the proxy, with no upstream traffic."""
+    body = _chat_body(
+        [
+            {"role": "system", "content": SYSTEM},
+            {"role": "user", "content": PREFIX + QUESTION},
+        ]
+    )
+    for bad in ("bad id", "x" * 65, "../../evil"):
+        resp = httpx.post(
+            f"{PROXY_PRIMARY}/v1/chat/completions",
+            json=body,
+            headers={"X-Stillwarm-Session": bad},
+            timeout=CHAT_TIMEOUT_S,
+        )
+        assert resp.status_code == 400, bad
+        assert "X-Stillwarm-Restore" not in resp.headers
+    assert not any(cache_dir.iterdir())
+
+
+def test_proxy_first_turn_cold_and_probed_triple(cache_dir: Path) -> None:
+    """First chat through the proxy: forwarded cold, then a probed triple lands
+    in the shared volume (probe ON by default)."""
+    body = _chat_body(
+        [
+            {"role": "system", "content": SYSTEM},
+            {"role": "user", "content": PREFIX + QUESTION},
+        ]
+    )
+    resp = _proxy_chat(PROXY_PRIMARY, body, session_id="px-cold")
+    assert resp.status_code == 200
+    assert resp.headers["X-Stillwarm-Restore"] == "cold"
+    data = resp.json()
+    assert data["choices"][0]["message"]["content"]
+    assert data["usage"]["completion_tokens"] > 0
+
+    # The save (with its probe) completes after the response: wait for it.
+    sc = _wait_for_triple(cache_dir, "px-cold")
+    assert sc.probe_kind == "chat"
+    assert sc.probe_hash  # the pinned chat probe ran against the real model
+    assert sc.n_saved_tokens > 0
+    assert (cache_dir / "px-cold.prefix.txt").read_bytes()  # the replayable probe record
+
+
+def test_proxy_second_turn_restores_with_tail_only_prefill(cache_dir: Path) -> None:
+    """Multi-turn: the client resends its full history (assistant reply
+    included); the proxy restores and the server prefills only the new tail."""
+    user1 = PREFIX + QUESTION
+    r1 = _proxy_chat(
+        PROXY_PRIMARY,
+        _chat_body(
+            [
+                {"role": "system", "content": SYSTEM},
+                {"role": "user", "content": user1},
+            ]
+        ),
+        session_id="px-turn",
+    )
+    assert r1.status_code == 200
+    reply1 = r1.json()["choices"][0]["message"]["content"]
+    assert reply1
+    n_saved = _wait_for_triple(cache_dir, "px-turn").n_saved_tokens  # turn-1 state
+
+    r2 = _proxy_chat(
+        PROXY_PRIMARY,
+        _chat_body(
+            [
+                {"role": "system", "content": SYSTEM},
+                {"role": "user", "content": user1},
+                {"role": "assistant", "content": reply1},
+                {"role": "user", "content": "Who holds the key?"},
+            ]
+        ),
+        session_id="px-turn",
+    )
+    assert r2.status_code == 200
+    assert r2.headers["X-Stillwarm-Restore"] == "ok"
+    data = r2.json()
+    # reuse evidence: most of the saved state came from the slot, not a re-prefill
+    cached = data["usage"]["prompt_tokens_details"]["cached_tokens"]
+    assert cached >= RESTORE_REUSE_FRACTION * n_saved
+    assert data["timings"]["prompt_n"] < TAIL_ONLY_MAX_TOKENS
+
+
+def test_proxy_cross_restart_restore_and_chat_probe_reproduction(
+    cache_dir: Path, twin: LlamaServer, build_tag: str
+) -> None:
+    """A session saved through proxy-primary restores through proxy-twin (the
+    fresh upstream), and its chat probe reproduces the save-time hash when
+    verified on the twin (verify replays .prefix.txt via /v1/chat/completions)."""
+    user1 = PREFIX + QUESTION
+    r1 = _proxy_chat(
+        PROXY_PRIMARY,
+        _chat_body(
+            [
+                {"role": "system", "content": SYSTEM},
+                {"role": "user", "content": user1},
+            ]
+        ),
+        session_id="px-verify",
+    )
+    assert r1.status_code == 200
+    reply1 = r1.json()["choices"][0]["message"]["content"]
+    sc1 = _wait_for_triple(cache_dir, "px-verify")  # the turn-1 state on disk
+    before = _sidecar_mtime_ns(cache_dir, "px-verify")
+
+    # The twin proxy restores the same triple into its own (fresh) upstream.
+    r2 = _proxy_chat(
+        PROXY_TWIN,
+        _chat_body(
+            [
+                {"role": "system", "content": SYSTEM},
+                {"role": "user", "content": user1},
+                {"role": "assistant", "content": reply1},
+                {"role": "user", "content": "Who holds the key?"},
+            ]
+        ),
+        session_id="px-verify",
+    )
+    assert r2.status_code == 200
+    assert r2.headers["X-Stillwarm-Restore"] == "ok"
+    sc2 = _wait_for_triple(cache_dir, "px-verify", newer_than_ns=before)
+    assert sc2.n_saved_tokens > sc1.n_saved_tokens  # the turn-2 state replaced it
+    cached = r2.json()["usage"]["prompt_tokens_details"]["cached_tokens"]
+    # r2 restored the turn-1 state: reuse evidence against THAT sidecar
+    assert cached >= RESTORE_REUSE_FRACTION * sc1.n_saved_tokens
+
+    # Chat-probe reproduction on the fresh process: verify replays the pinned
+    # chat request and hashes the message exactly as the save did.
+    sw = make_session(twin, cache_dir, build_tag)
+    assert sw.restore("px-verify", verify=True) is True
+
+
+def test_proxy_restore_refused_on_fa_off_upstream(cache_dir: Path) -> None:
+    """REFUSE(fa) through the middleware: the fa-off proxy refuses the fa-on
+    triple, erases its slot, forwards cold, and the client still gets its
+    completion (with the refused marker)."""
+    body = _chat_body(
+        [
+            {"role": "system", "content": SYSTEM},
+            {"role": "user", "content": PREFIX + QUESTION},
+        ]
+    )
+    assert _proxy_chat(PROXY_PRIMARY, body, session_id="px-fa").status_code == 200
+    _wait_for_triple(cache_dir, "px-fa")  # the fa-off refusal needs the triple
+
+    resp = _proxy_chat(PROXY_FA_OFF, body, session_id="px-fa")
+    assert resp.status_code == 200
+    assert resp.headers["X-Stillwarm-Restore"] == "refused"
+    assert resp.json()["choices"][0]["message"]["content"]
+    # refusal erases the upstream slot, never the saved triple
+    assert (cache_dir / "px-fa.bin").exists()
+
+
+def test_proxy_restore_refused_when_state_exceeds_ctx(cache_dir: Path) -> None:
+    """REFUSE(ctx-fit) through the middleware: a state saved at ctx 1024 must
+    not restore into the ctx-256 upstream; the oversized cold forward then
+    fails at the server, and the proxy relays that error."""
+    big = PREFIX * 6 + QUESTION
+    body = _chat_body(
+        [
+            {"role": "system", "content": SYSTEM},
+            {"role": "user", "content": big},
+        ]
+    )
+    assert _proxy_chat(PROXY_PRIMARY, body, session_id="px-ctx").status_code == 200
+    sc = _wait_for_triple(cache_dir, "px-ctx")
+    assert sc.n_saved_tokens > SMALL_CTX
+    before = _sidecar_mtime_ns(cache_dir, "px-ctx")
+
+    resp = _proxy_chat(PROXY_SMALL_CTX, body, session_id="px-ctx")
+    assert resp.headers["X-Stillwarm-Restore"] == "refused"
+    # the upstream rejects the oversized prompt (measured b9871: 400 + text)
+    assert resp.status_code == 400
+    assert "exceeds the available context size" in resp.text
+    # the failed cold forward saved nothing: the primary's triple is intact
+    assert _sidecar_mtime_ns(cache_dir, "px-ctx") == before
+
+
+def test_proxy_passthrough_is_byte_identical() -> None:
+    """Every non-chat path is relayed verbatim — GET, non-GET methods, and
+    slot-cache ops alike — with no stillwarm header added."""
+    # /slots/0?action=erase reports how many tokens it removed, so it is not
+    # idempotent: quiesce the shared slot (erase until a no-op) so the
+    # proxy-issued and direct-issued requests below see identical state.
+    deadline = time.monotonic() + 10.0
+    erased: int | None = None
+    while time.monotonic() < deadline:
+        erased = httpx.post(
+            f"{URL_PRIMARY}/slots/0?action=erase", content=b"{}", timeout=CHAT_TIMEOUT_S
+        ).json()["n_erased"]
+        if erased == 0:
+            break
+        time.sleep(0.2)
+    assert erased == 0, "the slot never went quiet; a save is still in flight"
+
+    cases = (
+        ("GET", "/props", None),
+        ("GET", "/health", None),
+        # slot-cache op: serialized under the proxy's lock, still verbatim
+        ("POST", "/slots/0?action=erase", b"{}"),
+        # non-GET method on an unknown path: the upstream's 404, unchanged
+        ("PUT", "/nope", b"{}"),
+    )
+    for method, path, body in cases:
+        via_proxy = httpx.request(
+            method, f"{PROXY_PRIMARY}{path}", content=body, timeout=CHAT_TIMEOUT_S
+        )
+        direct = httpx.request(method, f"{URL_PRIMARY}{path}", content=body, timeout=CHAT_TIMEOUT_S)
+        assert via_proxy.status_code == direct.status_code, path
+        assert via_proxy.content == direct.content, path
+        assert "X-Stillwarm-Restore" not in via_proxy.headers, path
+
+
+def test_proxy_chat_path_passthrough_for_non_chat_body() -> None:
+    """POST /v1/chat/completions without a messages list is not a chat request
+    the proxy can reason about: it passes through, unannotated."""
+    body = {"foo": "bar"}
+    via_proxy = httpx.post(
+        f"{PROXY_PRIMARY}/v1/chat/completions", json=body, timeout=CHAT_TIMEOUT_S
+    )
+    direct = httpx.post(f"{URL_PRIMARY}/v1/chat/completions", json=body, timeout=CHAT_TIMEOUT_S)
+    assert via_proxy.status_code == direct.status_code
+    assert via_proxy.content == direct.content
+    assert "X-Stillwarm-Restore" not in via_proxy.headers
+
+
+def test_proxy_header_id_vs_derived_id(cache_dir: Path) -> None:
+    """The X-Stillwarm-Session header names the file; without it, the id is
+    derived from [system, first user] — the same conversation lives in two
+    independent triples, and each restores on its own."""
+    body = _chat_body(
+        [
+            {"role": "system", "content": SYSTEM},
+            {"role": "user", "content": PREFIX + QUESTION},
+        ]
+    )
+    assert _proxy_chat(PROXY_PRIMARY, body, session_id="px-hdr").status_code == 200
+    assert _proxy_chat(PROXY_PRIMARY, body).status_code == 200
+
+    derived = derived_session_id(body)
+    assert derived != "px-hdr"
+    _wait_for_triple(cache_dir, "px-hdr")
+    _wait_for_triple(cache_dir, derived)
+    assert (cache_dir / "px-hdr.bin").exists()
+    assert (cache_dir / f"{derived}.bin").exists()
+    # the second derived turn restores from its own triple
+    resp = _proxy_chat(PROXY_PRIMARY, body)
+    assert resp.headers["X-Stillwarm-Restore"] == "ok"

@@ -87,7 +87,7 @@ class LlamaServer:
             return True
 
     def props(self) -> dict[str, Any]:
-        """Server properties: build_info, total_slots, n_ctx, model metadata."""
+        """Server properties: build_info, total_slots, model metadata."""
         return self._request("GET", "/props")
 
     def tokenize(self, text: str) -> list[int]:
