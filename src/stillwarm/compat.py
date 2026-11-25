@@ -7,6 +7,7 @@ Categories mirror the measured stillwarm-bench Block-D taxonomy:
 
 The decision is pure and side-effect free; callers act on it.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -22,8 +23,9 @@ OK = "OK"
 @dataclasses.dataclass
 class ServerProfile:
     """The relevant properties of the running llama-server."""
+
     model_sha256: str
-    flash_attn: str          # resolved "on" | "off"
+    flash_attn: str  # resolved "on" | "off"
     cache_type_k: str
     cache_type_v: str
     swa_full: bool
@@ -32,11 +34,11 @@ class ServerProfile:
 
 @dataclasses.dataclass
 class Decision:
-    verdict: str                       # REFUSE | ADVISORY | OK
+    verdict: str  # REFUSE | ADVISORY | OK
     refusals: List[str]
     advisories: List[str]
 
-    def __bool__(self) -> bool:        # truthy == loadable (OK or ADVISORY)
+    def __bool__(self) -> bool:  # truthy == loadable (OK or ADVISORY)
         return self.verdict != REFUSE
 
 
@@ -50,19 +52,23 @@ def check(sidecar: Sidecar, server: ServerProfile) -> Decision:
     if sidecar.flash_attn != server.flash_attn:
         refusals.append(
             f"flash-attention mismatch (file: {sidecar.flash_attn}, server: "
-            f"{server.flash_attn}): measured FAILS-CLEAN in both directions")
+            f"{server.flash_attn}): measured FAILS-CLEAN in both directions"
+        )
     if sidecar.cache_type_k != server.cache_type_k or sidecar.cache_type_v != server.cache_type_v:
         refusals.append(
             f"KV cache type mismatch (file: {sidecar.cache_type_k}/{sidecar.cache_type_v}, "
-            f"server: {server.cache_type_k}/{server.cache_type_v})")
+            f"server: {server.cache_type_k}/{server.cache_type_v})"
+        )
     if sidecar.swa_full != server.swa_full:
         refusals.append(
             "swa_full mismatch: restoring an SWA cache without --swa-full is "
-            "silently ineffective (measured)")
+            "silently ineffective (measured)"
+        )
     if sidecar.n_saved_tokens > server.ctx_size:
         refusals.append(
             f"state does not fit: {sidecar.n_saved_tokens} saved tokens > server "
-            f"ctx {server.ctx_size} (ctx-fit rule; server would refuse anyway, loudly)")
+            f"ctx {server.ctx_size} (ctx-fit rule; server would refuse anyway, loudly)"
+        )
 
     # --- ADVISORY (measured compatible; warn only) ---
     # Cross-build restore measured WORKS in both directions across >=5 weeks
@@ -77,11 +83,13 @@ def check(sidecar: Sidecar, server: ServerProfile) -> Decision:
 def check_build(sidecar: Sidecar, server_build_tag: str) -> Decision:
     """Separate advisory-only check for build drift (needs the caller to know the
     running server's build tag; kept apart from `check` so callers without that
-    information still get the full REFUSE contract)."""
+    information still get the full REFUSE contract).
+    """
     advisories: List[str] = []
     if sidecar.build_tag and server_build_tag and sidecar.build_tag != server_build_tag:
         advisories.append(
             f"llama.cpp build differs (file: {sidecar.build_tag}, server: "
             f"{server_build_tag}): measured compatible across >=5 weeks of releases, "
-            "but the format has no upstream stability guarantee")
+            "but the format has no upstream stability guarantee"
+        )
     return Decision(ADVISORY if advisories else OK, [], advisories)

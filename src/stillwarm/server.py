@@ -8,6 +8,7 @@ pinned llama.cpp build (b9871) during the stillwarm-bench measurements:
   POST /completion          (non-stream)                -> {..., "timings": {...}}
   POST /slots/{id}?action=save|restore|erase  {"filename": str}
 """
+
 from __future__ import annotations
 
 import json
@@ -28,8 +29,7 @@ class ServerError(RuntimeError):
 #: pinned sampler parameters for probe generation — part of the sidecar contract.
 #: ignore_eos keeps every probe exactly PROBE_N_PREDICT tokens (constant-length
 #: probes make the determinism comparison independent of where EOS falls).
-PROBE_SAMPLER: Dict[str, Any] = {"temperature": 0, "top_k": 1, "seed": 42,
-                                 "ignore_eos": True}
+PROBE_SAMPLER: Dict[str, Any] = {"temperature": 0, "top_k": 1, "seed": 42, "ignore_eos": True}
 PROBE_N_PREDICT = 64
 
 #: default sampler for user requests through Session.ask (greedy, EOS honored).
@@ -44,8 +44,12 @@ class LlamaServer:
     # -- plumbing ------------------------------------------------------------
     def _request(self, method: str, path: str, payload: Optional[dict] = None) -> dict:
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
-        req = urllib.request.Request(self.base_url + path, data=data, method=method,
-                                     headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(
+            self.base_url + path,
+            data=data,
+            method=method,
+            headers={"Content-Type": "application/json"},
+        )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 return json.loads(resp.read().decode("utf-8") or "{}")
@@ -75,11 +79,24 @@ class LlamaServer:
     def tokenize(self, text: str) -> List[int]:
         return self._request("POST", "/tokenize", {"content": text})["tokens"]
 
-    def completion(self, prompt: str, n_predict: int, *, cache_prompt: bool = True,
-                   id_slot: int = 0, return_tokens: bool = True,
-                   sampler: Optional[dict] = None) -> dict:
-        body = {"prompt": prompt, "n_predict": n_predict, "cache_prompt": cache_prompt,
-                "id_slot": id_slot, "return_tokens": return_tokens, "stream": False}
+    def completion(
+        self,
+        prompt: str,
+        n_predict: int,
+        *,
+        cache_prompt: bool = True,
+        id_slot: int = 0,
+        return_tokens: bool = True,
+        sampler: Optional[dict] = None,
+    ) -> dict:
+        body = {
+            "prompt": prompt,
+            "n_predict": n_predict,
+            "cache_prompt": cache_prompt,
+            "id_slot": id_slot,
+            "return_tokens": return_tokens,
+            "stream": False,
+        }
         body.update(sampler or PROBE_SAMPLER)
         return self._request("POST", "/completion", body)
 

@@ -7,6 +7,7 @@
 The session wrapper itself is a library API (stillwarm.Session) — wiring it to a
 long-running proxy CLI is deliberately out of v0.1 scope.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -18,8 +19,9 @@ from .sidecar import Sidecar, sidecar_path_for
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="stillwarm",
-                                 description="KV-cache session persistence for llama-server")
+    ap = argparse.ArgumentParser(
+        prog="stillwarm", description="KV-cache session persistence for llama-server"
+    )
     ap.add_argument("--version", action="version", version=f"stillwarm {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -41,11 +43,13 @@ def main(argv=None) -> int:
         total = sum(r["bytes"] for r in recs)
         for r in recs:
             sc = r.get("sidecar") or {}
-            print(f"{r['session_id']:<28} {r['bytes']/1e9:8.3f} GB  age {r['age_hours']:>7.1f} h  "
-                  f"tokens {sc.get('n_saved_tokens', '?'):>7}  "
-                  f"[{sc.get('cache_type_k', '?')}/fa={sc.get('flash_attn', '?')}"
-                  f"/{sc.get('build_tag') or 'no-tag'}]")
-        print(f"{'TOTAL':<28} {total/1e9:8.3f} GB  ({len(recs)} sessions)")
+            print(
+                f"{r['session_id']:<28} {r['bytes'] / 1e9:8.3f} GB  age {r['age_hours']:>7.1f} h  "
+                f"tokens {sc.get('n_saved_tokens', '?'):>7}  "
+                f"[{sc.get('cache_type_k', '?')}/fa={sc.get('flash_attn', '?')}"
+                f"/{sc.get('build_tag') or 'no-tag'}]"
+            )
+        print(f"{'TOTAL':<28} {total / 1e9:8.3f} GB  ({len(recs)} sessions)")
         return 0
 
     if ns.cmd == "inspect":

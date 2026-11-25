@@ -21,6 +21,7 @@ Design decisions (each grounded in a measured stillwarm-bench result):
     near-full re-prefill triggers a loud SILENTLY-INEFFECTIVE warning (a measured
     llama.cpp failure mode; see the stillwarm-bench results).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -31,11 +32,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from .compat import ServerProfile, check, check_build, REFUSE
-from .server import (LlamaServer, ServerError, PROBE_SAMPLER, PROBE_N_PREDICT,
-                     DEFAULT_SAMPLER)
-from .sidecar import Sidecar, sidecar_path_for
 from . import store as store_mod
+from .compat import REFUSE, ServerProfile, check, check_build
+from .server import DEFAULT_SAMPLER, PROBE_N_PREDICT, PROBE_SAMPLER, LlamaServer, ServerError
+from .sidecar import Sidecar, sidecar_path_for
 
 
 class RefusedRestore(RuntimeError):
@@ -54,7 +54,7 @@ class IneffectiveRestoreWarning(UserWarning):
 class AskResult:
     content: str
     timings: dict
-    restored: bool          # this request was served from a disk restore
+    restored: bool  # this request was served from a disk restore
     verified: Optional[bool]  # None = --verify not requested
     prompt_n: Optional[int]
     warning: str = ""
@@ -65,9 +65,17 @@ def _hash_tokens(tokens) -> str:
 
 
 class Session:
-    def __init__(self, server: LlamaServer, profile: ServerProfile, cache_dir,
-                 *, server_build_tag: str = "", disk_budget_gb: Optional[float] = None,
-                 verify: bool = False, id_slot: int = 0):
+    def __init__(
+        self,
+        server: LlamaServer,
+        profile: ServerProfile,
+        cache_dir,
+        *,
+        server_build_tag: str = "",
+        disk_budget_gb: Optional[float] = None,
+        verify: bool = False,
+        id_slot: int = 0,
+    ):
         self.server = server
         self.profile = profile
         self.cache_dir = Path(os.path.expanduser(str(cache_dir)))
@@ -76,7 +84,7 @@ class Session:
         self.disk_budget_gb = disk_budget_gb
         self.verify = verify
         self.id_slot = id_slot
-        self._live_prefix: dict = {}      # session_id -> prefix text currently in the slot
+        self._live_prefix: dict = {}  # session_id -> prefix text currently in the slot
         self._loaded: Optional[str] = None  # session_id currently in the slot
 
     # -- paths ---------------------------------------------------------------
@@ -97,8 +105,15 @@ class Session:
     # ==========================================================================
     # THE CORE LOOP
     # ==========================================================================
-    def ask(self, session_id: str, full_prompt: str, n_predict: int = 256,
-            *, sampler: Optional[dict] = None, verify: Optional[bool] = None) -> AskResult:
+    def ask(
+        self,
+        session_id: str,
+        full_prompt: str,
+        n_predict: int = 256,
+        *,
+        sampler: Optional[dict] = None,
+        verify: Optional[bool] = None,
+    ) -> AskResult:
         """restore-before-request -> completion -> save-after-response."""
         do_verify = self.verify if verify is None else verify
         restored, verified, warning = False, None, ""
@@ -107,9 +122,13 @@ class Session:
             verified = self.restore(session_id, verify=do_verify)
             restored = True
 
-        res = self.server.completion(full_prompt, n_predict, cache_prompt=True,
-                                     id_slot=self.id_slot,
-                                     sampler=sampler or dict(DEFAULT_SAMPLER))
+        res = self.server.completion(
+            full_prompt,
+            n_predict,
+            cache_prompt=True,
+            id_slot=self.id_slot,
+            sampler=sampler or dict(DEFAULT_SAMPLER),
+        )
         prompt_n = (res.get("timings") or {}).get("prompt_n")
 
         if restored:
@@ -126,9 +145,14 @@ class Session:
         if self.disk_budget_gb is not None:
             store_mod.prune(self.cache_dir, self.disk_budget_gb)
 
-        return AskResult(content=res.get("content", ""), timings=res.get("timings", {}),
-                         restored=restored, verified=verified, prompt_n=prompt_n,
-                         warning=warning)
+        return AskResult(
+            content=res.get("content", ""),
+            timings=res.get("timings", {}),
+            restored=restored,
+            verified=verified,
+            prompt_n=prompt_n,
+            warning=warning,
+        )
 
     # ==========================================================================
     # SAVE — file is written at the PRE-probe state (save before probe; critical)
@@ -138,7 +162,8 @@ class Session:
         (0 for a pure prefill/prime save). It determines the honest save_point label:
         an after_generation state is NOT a strict prefix of a future prompt that asks
         a different question, which on SWA models forces an impossible rollback
-        (measured in stillwarm-bench)."""
+        (measured in stillwarm-bench).
+        """
         prefix = self._live_prefix.get(session_id)
         if prefix is None:
             raise ValueError(f"session {session_id!r} has no live state to save")
@@ -151,8 +176,13 @@ class Session:
         # 2. Probe AFTER the save: 64 greedy tokens continuing the prefix.
         #    (This advances the live KV state; the FILE is already sealed. The next
         #    user request re-trims the probe tail via normal prefix matching.)
-        probe = self.server.completion(prefix, PROBE_N_PREDICT, cache_prompt=True,
-                                       id_slot=self.id_slot, sampler=dict(PROBE_SAMPLER))
+        probe = self.server.completion(
+            prefix,
+            PROBE_N_PREDICT,
+            cache_prompt=True,
+            id_slot=self.id_slot,
+            sampler=dict(PROBE_SAMPLER),
+        )
         probe_hash = _hash_tokens(probe.get("tokens") or probe.get("content"))
 
         # 3. Sidecar + retained prefix text (needed to re-run the probe at restore).
@@ -202,9 +232,12 @@ class Session:
             # Cost (measured, 8K/M3 Max): ~2x restore + ~1.5 s of 64-token decode.
             prefix = self._prefix_path(session_id).read_text(encoding="utf-8")
             probe = self.server.completion(
-                prefix, sc.probe_n_predict or PROBE_N_PREDICT, cache_prompt=True,
-                id_slot=self.id_slot, sampler=json.loads(sc.probe_sampler_json or "null")
-                or dict(PROBE_SAMPLER))
+                prefix,
+                sc.probe_n_predict or PROBE_N_PREDICT,
+                cache_prompt=True,
+                id_slot=self.id_slot,
+                sampler=json.loads(sc.probe_sampler_json or "null") or dict(PROBE_SAMPLER),
+            )
             got = _hash_tokens(probe.get("tokens") or probe.get("content"))
             verified = got == sc.probe_hash
             # RE-RESTORE so the served state is exactly the restored state,
@@ -215,21 +248,25 @@ class Session:
                 raise VerifyFailed(
                     f"restored state failed the determinism probe: expected "
                     f"{sc.probe_hash[:16]}..., got {got[:16]}... — the file, model, or "
-                    f"server config does not reproduce the save-time continuation")
+                    f"server config does not reproduce the save-time continuation"
+                )
 
-        self._live_prefix[session_id] = self._prefix_path(session_id).read_text(encoding="utf-8") \
-            if self._prefix_path(session_id).exists() else ""
+        self._live_prefix[session_id] = (
+            self._prefix_path(session_id).read_text(encoding="utf-8")
+            if self._prefix_path(session_id).exists()
+            else ""
+        )
         self._loaded = session_id
         return verified
 
     # ==========================================================================
     # SILENTLY-INEFFECTIVE GUARD (a measured failure mode, surfaced as a warning)
     # ==========================================================================
-    def _ineffective_guard(self, session_id: str, full_prompt: str,
-                           prompt_n: Optional[int]) -> str:
+    def _ineffective_guard(self, session_id: str, full_prompt: str, prompt_n: Optional[int]) -> str:
         """After a restore, the first request should only prefill the NEW tail.
         If the server reports (near-)full re-prefill, the restore was silently
-        ineffective — warn loudly with the measured likely cause."""
+        ineffective — warn loudly with the measured likely cause.
+        """
         if prompt_n is None:
             return ""
         try:
@@ -244,16 +281,21 @@ class Session:
             save_point = Sidecar.read(sidecar_path_for(self._bin_path(session_id))).save_point
         except Exception:
             pass
-        causes = ["an SWA model (Gemma family) without --swa-full on the server",
-                  "a prompt that does not extend the saved prefix"]
+        causes = [
+            "an SWA model (Gemma family) without --swa-full on the server",
+            "a prompt that does not extend the saved prefix",
+        ]
         if save_point == "after_generation":
             causes.append(
                 "the saved state ends with generated tokens (save_point=after_generation); "
                 "a new question that diverges from them forces a rollback, which SWA caches "
-                "without --swa-full cannot do (measured: full re-prefill)")
-        msg = (f"restore of session {session_id!r} was SILENTLY INEFFECTIVE: the first "
-               f"request re-prefilled {prompt_n}/{full_tokens} tokens instead of reusing "
-               f"the restored cache. Measured likely causes: {'; '.join(causes)}. "
-               f"You paid full cold-start cost despite the restore.")
+                "without --swa-full cannot do (measured: full re-prefill)"
+            )
+        msg = (
+            f"restore of session {session_id!r} was SILENTLY INEFFECTIVE: the first "
+            f"request re-prefilled {prompt_n}/{full_tokens} tokens instead of reusing "
+            f"the restored cache. Measured likely causes: {'; '.join(causes)}. "
+            f"You paid full cold-start cost despite the restore."
+        )
         warnings.warn(msg, IneffectiveRestoreWarning, stacklevel=3)
         return msg
