@@ -25,7 +25,7 @@ it into. stillwarm is a zero-dependency Python library:
 uv add stillwarm
 ```
 
-Python 3.9 or newer. No runtime dependencies.
+Python 3.13 or newer. No runtime dependencies.
 
 ## Quickstart
 

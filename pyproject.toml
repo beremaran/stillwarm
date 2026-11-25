@@ -7,7 +7,7 @@ name = "stillwarm"
 version = "0.1.1"
 description = "Automatic KV-cache session persistence for llama-server: save the model's 'notes' to disk, restore them after a restart, refuse incompatible files."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.13"
 # ZERO runtime dependencies — by design.
 dependencies = []
 authors = [{name = "Vimal Nakrani", email = "vimalnak@gmail.com"}]
@@ -17,6 +17,8 @@ classifiers = [
   "Development Status :: 4 - Beta",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Operating System :: OS Independent",
 ]
 
@@ -34,7 +36,7 @@ where = ["src"]
 preset = "strict"
 project-includes = ["src", "tests"]
 search-path = ["src"]
-python-version = "3.9"  # matches requires-python
+python-version = "3.13"  # matches requires-python
 python-platform = "all"  # OS-independent library
 check-unannotated-defs = true  # mypy check_untyped_defs
 infer-return-types = "never"  # mypy check_untyped_defs
@@ -53,7 +55,7 @@ unused-ignore = "error"  # mypy warn_unused_ignores
 unused-type-ignore = "error"  # pyrefly is the only type checker; # type: ignore is dead weight
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py313"
 line-length = 100
 
 [tool.ruff.lint]
