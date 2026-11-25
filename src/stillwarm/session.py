@@ -20,6 +20,10 @@ Design decisions (each grounded in measured llama.cpp behavior):
     (-ngl excluded; ctx via fit rule; build tag advisory).
   * saves happen at the PREFIX state, BEFORE probe generation (save_point=doc_prefill):
     the file must represent the pre-probe state.
+  * save_chat (the proxy path) uses the chat probe: it re-POSTs the session's
+    own chat request with generation pinned greedy (chat_probe_body), so the
+    server re-renders the identical template and the probe continues from
+    exactly the saved state — the same teeth as the /completion probe.
   * --verify is a DETERMINISM check against the save-time probe hash — deliberately
     NOT cold-equivalence, which measurably fails for quantized caches.
   * after every restore, the first request's server-reported prompt_n is inspected;
@@ -34,6 +38,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 import orjson
 
 from . import store as store_mod
@@ -44,6 +49,101 @@ from .sidecar import Sidecar, sidecar_path_for
 
 # Default generation length for ask() when the caller does not choose one.
 DEFAULT_N_PREDICT = 256
+
+# Chat probe (save_chat): the probe re-POSTs the session's own chat request
+# with generation pinned, so the server re-renders the identical template and
+# the probe continues from exactly the saved state. CHAT_PROBE_SAMPLER is
+# recorded in the sidecar per save, like PROBE_SAMPLER for /completion probes.
+CHAT_PROBE_SAMPLER: dict[str, Any] = {
+    "temperature": 0,
+    "top_k": 1,
+    "ignore_eos": True,
+    "max_tokens": PROBE_N_PREDICT,
+}
+# The probe must not inherit a client-request timeout: a wedged server would
+# otherwise hold the proxy's global lock for the whole request timeout. This
+# is the probe's dedicated bound (design choice, not a server property).
+CHAT_PROBE_TIMEOUT_S = 120.0
+
+# Fields a chat request may carry that affect generation or response shape but
+# never the rendered prompt. The probe strips exactly these and pins
+# CHAT_PROBE_SAMPLER, so the probe's prompt renders to the identical tokens as
+# the original request while its generation is fully deterministic. Field
+# names measured against llama.cpp b9871: server-schema.cpp, the
+# server_request schema shared by /completion and /v1/chat/completions.
+_CHAT_PROBE_STRIP = frozenset(
+    {
+        # generation limits
+        "n_predict",
+        "max_tokens",
+        "max_completion_tokens",
+        "t_max_predict_ms",
+        "n_cmpl",
+        "n_indent",
+        # sampling
+        "temperature",
+        "top_p",
+        "top_k",
+        "top_n_sigma",
+        "min_p",
+        "typical_p",
+        "xtc_probability",
+        "xtc_threshold",
+        "dynatemp_range",
+        "dynatemp_exponent",
+        "repeat_penalty",
+        "repeat_last_n",
+        "frequency_penalty",
+        "presence_penalty",
+        "dry_multiplier",
+        "dry_base",
+        "dry_allowed_length",
+        "dry_penalty_last_n",
+        "dry_sequence_breakers",
+        "mirostat",
+        "mirostat_tau",
+        "mirostat_eta",
+        "adaptive_target",
+        "adaptive_decay",
+        "seed",
+        "min_keep",
+        "n_probs",
+        "backend_sampling",
+        "post_sampling_probs",
+        "ignore_eos",
+        "logit_bias",
+        "samplers",
+        # decoding constraints
+        "json_schema",
+        "grammar_lazy",
+        "grammar_triggers",
+        "reasoning_control",
+        "reasoning_budget_tokens",
+        "reasoning_budget_start_tag",
+        "reasoning_budget_end_tag",
+        "reasoning_budget_message",
+        # streaming
+        "stream",
+        "stream_options",
+        "sse_ping_interval",
+    }
+)
+
+
+def chat_probe_body(body: dict[str, Any]) -> dict[str, Any]:
+    """Return the pinned, non-streaming probe form of a chat request.
+
+    Keeps every field that can affect the rendered prompt (messages, tools,
+    chat_format, stop, ...) verbatim, strips the generation, sampling and
+    streaming fields (_CHAT_PROBE_STRIP), and pins CHAT_PROBE_SAMPLER. Feeding
+    the result to /v1/chat/completions re-renders the identical prompt tokens
+    and generates a deterministic continuation — the chat analogue of the
+    /completion probe in save().
+    """
+    probe = {k: v for k, v in body.items() if k not in _CHAT_PROBE_STRIP}
+    probe.update(CHAT_PROBE_SAMPLER)
+    probe["stream"] = False
+    return probe
 
 
 class RefusedRestoreError(RuntimeError):
@@ -229,11 +329,92 @@ class Session:
         ptmp.replace(self._prefix_path(session_id))
         return sc
 
+    def save_chat(
+        self,
+        session_id: str,
+        probe_body: dict[str, Any] | None,
+        *,
+        generated_tokens: int = 0,
+    ) -> Sidecar:
+        """Save the slot's KV cache for a proxied chat session, with the chat probe.
+
+        Mirrors save(): slot_save runs BEFORE the probe, so the file holds the
+        pre-probe state. The probe re-POSTs the session's chat request with
+        generation pinned greedy (chat_probe_body); the server re-renders the
+        identical chat template, the probe continues from exactly the saved
+        state, and its message hash keeps verify's teeth. probe_body=None
+        records an unprobed sidecar (empty probe fields, empty .prefix.txt);
+        restore(verify=True) on such a sidecar returns None — nothing to
+        verify.
+
+        On probe failure the half-written triple is deleted (a save without a
+        valid probe record is not a restorable session) and the error is
+        re-raised for the caller to log; the session reverts to unsaved and
+        the next request rebuilds it.
+        """
+        binname = self._bin_name(session_id)
+        save_point = "after_generation" if generated_tokens > 0 else "doc_prefill"
+
+        # 1. SAVE FIRST: the file must represent the pre-probe state.
+        save = self.server.slot_save(binname, self.id_slot)
+
+        probe_hash = ""
+        probe_sampler_json = ""
+        prefix_bytes = b""
+        if probe_body is not None:
+            probe_input = chat_probe_body(probe_body)
+            probe_input.setdefault("id_slot", self.id_slot)
+            try:
+                probe = self.server.chat(probe_input, timeout=CHAT_PROBE_TIMEOUT_S)
+            except (ServerError, httpx.RequestError):
+                self._delete_triple(session_id)
+                raise
+            message = cast("list[Any]", probe.get("choices") or [{}])[0].get("message")
+            canonical = orjson.dumps(message, option=orjson.OPT_SORT_KEYS)
+            probe_hash = hashlib.sha256(canonical).hexdigest()
+            probe_sampler_json = orjson.dumps(CHAT_PROBE_SAMPLER).decode()
+            prefix_bytes = orjson.dumps(probe_input, option=orjson.OPT_SORT_KEYS)
+
+        sc = Sidecar(
+            model_sha256=self.profile.model_sha256,
+            flash_attn=self.profile.flash_attn,
+            cache_type_k=self.profile.cache_type_k,
+            cache_type_v=self.profile.cache_type_v,
+            swa_full=self.profile.swa_full,
+            n_saved_tokens=save["n_saved"],
+            prompt_prefix_sha256=hashlib.sha256(prefix_bytes).hexdigest(),
+            build_tag=self.server_build_tag,
+            probe_hash=probe_hash,
+            probe_n_predict=PROBE_N_PREDICT if probe_body is not None else 0,
+            probe_sampler_json=probe_sampler_json,
+            save_point=save_point,
+            save_file=binname,
+            size_bytes=save["n_written"],
+        )
+        sc.write(sidecar_path_for(self._bin_path(session_id)))
+        ppath = self._prefix_path(session_id)
+        ptmp = ppath.with_name(ppath.name + ".tmp")
+        ptmp.write_bytes(prefix_bytes)
+        ptmp.replace(ppath)
+        return sc
+
+    def _delete_triple(self, session_id: str) -> None:
+        """Remove the whole session triple; a half-save is not a session."""
+        for path in (
+            self._bin_path(session_id),
+            sidecar_path_for(self._bin_path(session_id)),
+            self._prefix_path(session_id),
+        ):
+            with contextlib.suppress(OSError):
+                path.unlink()
+
     def restore(self, session_id: str, *, verify: bool = False) -> bool | None:
         """Restore a saved session into the server slot.
 
         If verify=True, regenerates the probe and compares against the
-        save-time probe hash before re-restoring.
+        save-time probe hash before re-restoring. An unprobed sidecar (empty
+        probe_hash, written by save_chat with probe_body=None) short-circuits:
+        no probe is sent and the return value stays None — nothing to verify.
         """
         binname = self._bin_name(session_id)
         sc = Sidecar.read(sidecar_path_for(self._bin_path(session_id)))
@@ -249,7 +430,7 @@ class Session:
         self.server.slot_restore(binname, self.id_slot)
         verified: bool | None = None
 
-        if verify:
+        if verify and sc.probe_hash:
             # Cost: ~2x restore, plus a 64-token decode (~1.5 s for an 8B model).
             prefix = self._prefix_path(session_id).read_text(encoding="utf-8")
             probe = self.server.completion(

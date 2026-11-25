@@ -8,6 +8,7 @@ llama.cpp release b9871:
   GET  /health
   POST /tokenize            {"content": str}            -> {"tokens": [int]}
   POST /completion          (non-stream)                -> {..., "timings": {...}}
+  POST /v1/chat/completions (non-stream)                -> OpenAI chat response
   POST /slots/{id}?action=save|restore|erase  {"filename": str}
 """
 
@@ -110,6 +111,29 @@ class LlamaServer:
         }
         body.update(sampler or PROBE_SAMPLER)
         return self._request("POST", "/completion", body)
+
+    def chat(
+        self,
+        body: dict[str, Any],
+        *,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Non-streaming OpenAI chat completion against /v1/chat/completions.
+
+        The body is passed through verbatim except that `stream` is forced to
+        False: this method returns the parsed JSON response, so a stream would
+        be meaningless. `timeout` overrides the client-wide timeout for this
+        request alone (the save probe needs a short one). HTTP errors raise
+        ServerError; transport errors propagate as httpx.RequestError.
+        """
+        payload = {**body, "stream": False}
+        path = "/v1/chat/completions"
+        try:
+            resp = self._client.request("POST", path, json=payload, timeout=timeout)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise ServerError(e.response.status_code, e.response.text) from None
+        return dict(resp.json() or {})
 
     def slot_save(self, filename: str, id_slot: int = 0) -> dict[str, Any]:
         """Save the KV cache for a slot to disk."""

@@ -17,6 +17,7 @@ from .session import (
     RefusedRestoreError,
     Session,
     VerifyFailedError,
+    chat_probe_body,
 )
 from .sidecar import SIDECAR_VERSION, Sidecar, sidecar_path_for
 
@@ -39,6 +40,7 @@ __all__ = [
     "Sidecar",
     "VerifyFailedError",
     "__version__",
+    "chat_probe_body",
     "check",
     "check_build",
     "sidecar_path_for",
