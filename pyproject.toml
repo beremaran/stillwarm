@@ -21,25 +21,36 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["mypy>=1.8", "pytest>=8"]
+dev = ["pyrefly>=1.5", "pytest>=8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.mypy]
-strict = true
-disallow_untyped_defs = true
-warn_unused_configs = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_return_any = true
-disallow_any_generics = true
-no_implicit_reexport = true
-check_untyped_defs = true
-strict_equality = true
-no_implicit_optional = true
-extra_checks = true
-warn_unreachable = true
+[tool.pyrefly]
+# Migrated from the mypy strict config (see pyrefly.org migration docs).
+# preset "strict" rather than "legacy": the codebase is fully annotated, so
+# the migration-stepping-stone preset (which relaxes override and unbound-name
+# checks) would silently weaken the gate mypy strict used to be.
+preset = "strict"
+project-includes = ["src", "tests"]
+search-path = ["src"]
+python-version = "3.9"  # matches requires-python
+python-platform = "all"  # OS-independent library
+check-unannotated-defs = true  # mypy check_untyped_defs
+infer-return-types = "never"  # mypy check_untyped_defs
+
+[tool.pyrefly.errors]
+implicit-any = "error"  # mypy disallow_any_generics (covers all implicit-Any sub-kinds)
+implicit-any-parameter = "error"  # mypy disallow_untyped_defs
+unannotated-return = "error"  # mypy disallow_untyped_defs
+no-any-return = "error"  # mypy warn_return_any
+redundant-cast = "error"  # mypy warn_redundant_casts (mypy fails the run; "warn" is non-fatal here)
+unreachable = "error"  # mypy warn_unreachable
+implicit-reexport = "error"  # mypy no_implicit_reexport
+incompatible-comparison = "error"  # mypy strict_equality
+unnecessary-comparison = "error"  # mypy strict_equality
+unused-ignore = "error"  # mypy warn_unused_ignores
+unused-type-ignore = "error"  # pyrefly is the only type checker; # type: ignore is dead weight
 
 [tool.ruff]
 target-version = "py39"
@@ -63,3 +74,4 @@ ignore = [
   "PLR2004",  # literals in comparisons are the point of a test
   "S101",  # asserts are the test idiom
 ]
+

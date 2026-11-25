@@ -1,9 +1,11 @@
+from typing import Any
+
 from stillwarm import ADVISORY, OK, REFUSE, ServerProfile, check, check_build
 from stillwarm.sidecar import Sidecar
 
 
-def sc(**kw):
-    base = {
+def sc(**kw: Any) -> Sidecar:
+    base: dict[str, Any] = {
         "model_sha256": "m" * 64,
         "flash_attn": "on",
         "cache_type_k": "f16",
@@ -17,8 +19,8 @@ def sc(**kw):
     return Sidecar(**base)
 
 
-def srv(**kw):
-    base = {
+def srv(**kw: Any) -> ServerProfile:
+    base: dict[str, Any] = {
         "model_sha256": "m" * 64,
         "flash_attn": "on",
         "cache_type_k": "f16",

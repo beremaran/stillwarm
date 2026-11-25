@@ -28,6 +28,7 @@ import shutil
 import time
 import warnings
 from pathlib import Path
+from typing import Any
 from urllib.request import urlopen
 
 import pytest
@@ -95,13 +96,14 @@ PREFIX = (
 QUESTION = "Question: What happens on Mondays?\nAnswer:"
 
 
-def _fetch_props(url):
+def _fetch_props(url: str) -> dict[str, Any]:
     with urlopen(f"{url.rstrip('/')}/props", timeout=READY_TIMEOUT_S) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        props: dict[str, Any] = json.loads(resp.read().decode("utf-8"))
+        return props
 
 
 @pytest.fixture(scope="module", autouse=True)
-def wait_for_servers():
+def wait_for_servers() -> None:
     """Compose starts the servers before this container, but model load takes
     a few seconds; wait until every server answers /health."""
     for url in (URL_PRIMARY, URL_TWIN, URL_FA_OFF, URL_SMALL_CTX):
@@ -118,30 +120,30 @@ def wait_for_servers():
 
 
 @pytest.fixture(scope="module")
-def primary():
+def primary() -> LlamaServer:
     return LlamaServer(URL_PRIMARY)
 
 
 @pytest.fixture(scope="module")
-def twin():
+def twin() -> LlamaServer:
     return LlamaServer(URL_TWIN)
 
 
 @pytest.fixture(scope="module")
-def fa_off():
+def fa_off() -> LlamaServer:
     return LlamaServer(URL_FA_OFF)
 
 
 @pytest.fixture(scope="module")
-def small_ctx():
+def small_ctx() -> LlamaServer:
     return LlamaServer(URL_SMALL_CTX)
 
 
 @pytest.fixture(scope="module")
-def build_tag():
+def build_tag() -> str:
     """The live server's build tag (build_info from /props)."""
     props = _fetch_props(URL_PRIMARY)
-    tag = props.get("build_info", "")
+    tag: str = props.get("build_info", "")
     if not tag:
         msg = f"/props from {URL_PRIMARY} has no build_info; keys: {sorted(props)}"
         raise RuntimeError(msg)
@@ -149,7 +151,7 @@ def build_tag():
 
 
 @pytest.fixture
-def cache_dir():
+def cache_dir() -> Path:
     """The shared --slot-save-path directory, wiped before each test.
 
     The slot-save-path is fixed at server boot, so per-test isolation is a
@@ -163,7 +165,7 @@ def cache_dir():
     return d
 
 
-def profile(fa="on", ctx=FULL_CTX):
+def profile(fa: str = "on", ctx: int = FULL_CTX) -> ServerProfile:
     # f16/f16: the KV cache type the compose servers run with (the
     # llama-server default; no -ctk/-ctv flags are passed).
     return ServerProfile(
@@ -176,7 +178,12 @@ def profile(fa="on", ctx=FULL_CTX):
     )
 
 
-def make_session(api, cache_dir, build_tag, **profile_kwargs):
+def make_session(
+    api: LlamaServer,
+    cache_dir: Path,
+    build_tag: str,
+    **profile_kwargs: Any,
+) -> Session:
     return Session(
         api,
         profile(**profile_kwargs),
@@ -185,7 +192,12 @@ def make_session(api, cache_dir, build_tag, **profile_kwargs):
     )
 
 
-def test_works_roundtrip_across_restart(cache_dir, primary, twin, build_tag) -> None:
+def test_works_roundtrip_across_restart(
+    cache_dir: Path,
+    primary: LlamaServer,
+    twin: LlamaServer,
+    build_tag: str,
+) -> None:
     """WORKS: ask -> (server dies) -> ask again; restore reuses the prefix."""
     sw = make_session(primary, cache_dir, build_tag)
     r1 = sw.ask("s1", PREFIX + QUESTION, n_predict=24, sampler=dict(PROBE_SAMPLER))
@@ -201,7 +213,12 @@ def test_works_roundtrip_across_restart(cache_dir, primary, twin, build_tag) -> 
     assert r2.prompt_n < TAIL_ONLY_MAX_TOKENS
 
 
-def test_refuse_fa_mismatch(cache_dir, primary, fa_off, build_tag) -> None:
+def test_refuse_fa_mismatch(
+    cache_dir: Path,
+    primary: LlamaServer,
+    fa_off: LlamaServer,
+    build_tag: str,
+) -> None:
     """REFUSE(fa): sidecar fa=on must not load into an fa=off profile."""
     sw = make_session(primary, cache_dir, build_tag)
     sw.ask("s1", PREFIX + QUESTION, n_predict=8)
@@ -210,7 +227,12 @@ def test_refuse_fa_mismatch(cache_dir, primary, fa_off, build_tag) -> None:
         sw_off.restore("s1")
 
 
-def test_refuse_ctx_fit(cache_dir, primary, small_ctx, build_tag) -> None:
+def test_refuse_ctx_fit(
+    cache_dir: Path,
+    primary: LlamaServer,
+    small_ctx: LlamaServer,
+    build_tag: str,
+) -> None:
     """REFUSE(ctx-fit): state saved at ctx 1024 must not load into ctx smaller
     than the state (sidecar n_saved_tokens > server ctx).
     """
@@ -223,7 +245,7 @@ def test_refuse_ctx_fit(cache_dir, primary, small_ctx, build_tag) -> None:
         sw_small.restore("s1")
 
 
-def test_advisory_build_tag(cache_dir, primary, build_tag) -> None:
+def test_advisory_build_tag(cache_dir: Path, primary: LlamaServer, build_tag: str) -> None:
     """ADVISORY(build): different build tag warns but restores fine."""
     sw = make_session(primary, cache_dir, DIFFERENT_BUILD_TAG)  # saved under 'b0000'
     sw.ask("s1", PREFIX + QUESTION, n_predict=8)
@@ -234,7 +256,12 @@ def test_advisory_build_tag(cache_dir, primary, build_tag) -> None:
     assert any("build differs" in str(x.message) for x in w)
 
 
-def test_verify_pass(cache_dir, primary, twin, build_tag) -> None:
+def test_verify_pass(
+    cache_dir: Path,
+    primary: LlamaServer,
+    twin: LlamaServer,
+    build_tag: str,
+) -> None:
     """--verify: restored state reproduces the save-time probe hash."""
     sw = make_session(primary, cache_dir, build_tag)
     sw.ask("s1", PREFIX + QUESTION, n_predict=24)
@@ -246,7 +273,12 @@ def test_verify_pass(cache_dir, primary, twin, build_tag) -> None:
     assert r.prompt_n < TAIL_ONLY_MAX_TOKENS
 
 
-def test_verify_mismatch_on_corrupted_copy(cache_dir, primary, twin, build_tag) -> None:
+def test_verify_mismatch_on_corrupted_copy(
+    cache_dir: Path,
+    primary: LlamaServer,
+    twin: LlamaServer,
+    build_tag: str,
+) -> None:
     """--verify catches a corrupted save file (bytes flipped mid-payload).
 
     The corrupted copy can surface as a probe mismatch (VerifyFailedError) or
@@ -272,7 +304,12 @@ def test_verify_mismatch_on_corrupted_copy(cache_dir, primary, twin, build_tag) 
     assert not isinstance(ei.value, AssertionError)
 
 
-def test_ineffective_guard_fires_on_nonmatching_prompt(cache_dir, primary, twin, build_tag) -> None:
+def test_ineffective_guard_fires_on_nonmatching_prompt(
+    cache_dir: Path,
+    primary: LlamaServer,
+    twin: LlamaServer,
+    build_tag: str,
+) -> None:
     """Guard: restore then ask with a DIFFERENT prefix -> near-full re-prefill
     -> IneffectiveRestoreWarning (the guard doesn't care WHY reuse failed).
     """
@@ -290,7 +327,7 @@ def test_ineffective_guard_fires_on_nonmatching_prompt(cache_dir, primary, twin,
     assert "SILENTLY INEFFECTIVE" in r.warning
 
 
-def test_lru_prune_via_session(cache_dir, primary, build_tag) -> None:
+def test_lru_prune_via_session(cache_dir: Path, primary: LlamaServer, build_tag: str) -> None:
     """Disk budget: oldest session pruned when over budget."""
     sw = make_session(primary, cache_dir, build_tag)
     sw.ask("old", PREFIX + QUESTION, n_predict=8)
@@ -302,7 +339,11 @@ def test_lru_prune_via_session(cache_dir, primary, build_tag) -> None:
     assert (cache_dir / "new.bin").exists()
 
 
-def test_save_point_after_generation_in_ask_flow(cache_dir, primary, build_tag) -> None:
+def test_save_point_after_generation_in_ask_flow(
+    cache_dir: Path,
+    primary: LlamaServer,
+    build_tag: str,
+) -> None:
     """Regression: ask() generates a reply, so the saved state ends
     with sampled tokens -> sidecar must say after_generation (was mislabeled).
     """
@@ -315,7 +356,11 @@ def test_save_point_after_generation_in_ask_flow(cache_dir, primary, build_tag) 
     assert sc.n_saved_tokens > pre_gen
 
 
-def test_save_point_doc_prefill_in_prime_flow(cache_dir, primary, build_tag) -> None:
+def test_save_point_doc_prefill_in_prime_flow(
+    cache_dir: Path,
+    primary: LlamaServer,
+    build_tag: str,
+) -> None:
     """Prime flow: prefill-only state (no sampled tokens) -> doc_prefill."""
     sw = make_session(primary, cache_dir, build_tag)
     primary.slot_erase()  # fresh slot: the n_saved bound below assumes a clean start
@@ -326,7 +371,12 @@ def test_save_point_doc_prefill_in_prime_flow(cache_dir, primary, build_tag) -> 
     assert sc.n_saved_tokens <= len(primary.tokenize(PREFIX)) + BOS_SLACK  # prompt(+BOS) only
 
 
-def test_guard_message_mentions_after_generation(cache_dir, primary, twin, build_tag) -> None:
+def test_guard_message_mentions_after_generation(
+    cache_dir: Path,
+    primary: LlamaServer,
+    twin: LlamaServer,
+    build_tag: str,
+) -> None:
     """Guard must use the (now-correct) save_point in its diagnosis."""
     sw = make_session(primary, cache_dir, build_tag)
     sw.ask("s1", PREFIX * 3 + QUESTION, n_predict=8)  # after_generation state

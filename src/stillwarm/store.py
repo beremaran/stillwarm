@@ -31,12 +31,12 @@ def _triple(bin_path: Path) -> list[Path]:
     ]
 
 
-def sessions(cache_dir: str) -> list[dict[str, Any]]:
+def sessions(cache_dir: str | Path) -> list[dict[str, Any]]:
     """One record per stored session, oldest-used first."""
-    cache_path = Path(str(cache_dir)).expanduser()
+    cache_path = Path(cache_dir).expanduser()
     out: list[dict[str, Any]] = []
     for bin_path in sorted(cache_path.glob("*.bin")):
-        rec = {
+        rec: dict[str, Any] = {
             "session_id": bin_path.name[:-4],
             "bin": str(bin_path),
             "bytes": bin_path.stat().st_size,
@@ -55,7 +55,7 @@ def sessions(cache_dir: str) -> list[dict[str, Any]]:
     return out
 
 
-def prune(cache_dir: str, budget_gb: float, *, dry_run: bool = False) -> dict[str, Any]:
+def prune(cache_dir: str | Path, budget_gb: float, *, dry_run: bool = False) -> dict[str, Any]:
     """Delete least-recently-used session triples until under budget_gb.
 
     Windows note: files held open by another process raise PermissionError on
@@ -65,7 +65,8 @@ def prune(cache_dir: str, budget_gb: float, *, dry_run: bool = False) -> dict[st
     budget = int(budget_gb * _BYTES_PER_GB)
     recs = sessions(cache_dir)
     total = sum(r["bytes"] for r in recs)
-    removed, skipped_locked = [], []
+    removed: list[dict[str, Any]] = []
+    skipped_locked: list[dict[str, Any]] = []
     for r in recs:
         if total <= budget:
             break

@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -6,8 +8,8 @@ from stillwarm import Sidecar, sidecar_path_for
 from stillwarm.sidecar import SIDECAR_VERSION, IncompatibleSidecarError
 
 
-def mk(**kw):
-    base = {
+def mk(**kw: Any) -> Sidecar:
+    base: dict[str, Any] = {
         "model_sha256": "m" * 64,
         "flash_attn": "on",
         "cache_type_k": "f16",
@@ -20,7 +22,7 @@ def mk(**kw):
     return Sidecar(**base)
 
 
-def test_roundtrip(tmp_path) -> None:
+def test_roundtrip(tmp_path: Path) -> None:
     sc = mk(build_tag="b9871", probe_hash="h" * 64, save_file="x.bin", size_bytes=1)
     p = sc.write(tmp_path / "x.bin.stillwarm.json")
     assert Sidecar.read(p) == sc
@@ -31,7 +33,7 @@ def test_auto_fa_rejected() -> None:
         mk(flash_attn="auto")
 
 
-def test_unknown_version_refused(tmp_path) -> None:
+def test_unknown_version_refused(tmp_path: Path) -> None:
     sc = mk()
     d = sc.to_dict()
     d["sidecar_version"] = SIDECAR_VERSION + 1

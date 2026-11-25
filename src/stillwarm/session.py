@@ -140,7 +140,7 @@ class Session:
         """
         self.server = server
         self.profile = profile
-        self.cache_dir = Path(str(cache_dir)).expanduser()
+        self.cache_dir = Path(cache_dir).expanduser()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.server_build_tag = server_build_tag
         self.disk_budget_gb = disk_budget_gb
