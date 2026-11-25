@@ -87,16 +87,16 @@ and the `store` module cannot see the files either.
 Every row below comes from the 480-row benchmark matrix in [stillwarm-bench]
 (Block D portability taxonomy).
 
-| you change... | what happens | stillwarm's response |
+| you change... | what happens | what stillwarm does |
 |---|---|---|
-| flash-attention on<->off | restore fails (400) | **REFUSE** up front |
-| KV cache type (f16/q8_0/q4_0) | layout mismatch | **REFUSE** |
-| model file | meaningless state | **REFUSE** |
-| `--swa-full` (SWA models) | restore "works" but silently re-prefills | **REFUSE** + runtime guard |
-| server ctx < saved tokens | restore fails (fit rule) | **REFUSE** with a clear message |
-| server ctx >= saved tokens | works | OK |
-| `-ngl` (GPU layers) | works | OK — not part of the cache key |
-| llama.cpp build (+-5 weeks measured) | works both directions | **ADVISORY** warning only |
+| flash-attention on<->off | restore fails (400) | refuses up front |
+| KV cache type (f16/q8_0/q4_0) | layout mismatch | refuses up front |
+| model file | meaningless state | refuses up front |
+| `--swa-full` (SWA models) | restore "works" but silently re-prefills | refuses; a loud warning catches it if it ever slips through |
+| server ctx < saved tokens | restore fails (fit rule) | refuses with a clear message |
+| server ctx >= saved tokens | works | restores |
+| `-ngl` (GPU layers) | works | restores, not part of the cache key |
+| llama.cpp build (+-5 weeks measured) | works both directions | warns once, then restores |
 
 ## `verify`
 
