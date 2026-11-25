@@ -4,7 +4,7 @@
 """stillwarm CLI.
 
     stillwarm list    <cache_dir>              sessions, sizes, ages
-    stillwarm inspect <save_file>              sidecar + cache key
+    stillwarm inspect <save_file>              sidecar (JSON)
     stillwarm prune   <cache_dir> --budget-gb N [--dry-run]
 
 The session wrapper itself is a library API (stillwarm.Session) — wiring it to a
@@ -14,6 +14,7 @@ long-running proxy CLI is deliberately out of v0.1 scope.
 from __future__ import annotations
 
 import argparse
+import json
 
 from . import __version__, store
 from .sidecar import Sidecar, sidecar_path_for
@@ -43,17 +44,26 @@ def main(argv: list[str] | None = None) -> int:
 
     if ns.cmd == "list":
         recs = store.sessions(ns.cache_dir)
-        sum(r["bytes"] for r in recs)
+        total = sum(r["bytes"] for r in recs)
         for r in recs:
-            r.get("sidecar") or {}
+            sc = r.get("sidecar") or {}
+            print(
+                f"{r['session_id']:<28} {r['bytes'] / 1e9:8.3f} GB  "
+                f"age {r['age_hours']:>7.1f} h  tokens {sc.get('n_saved_tokens', '?'):>7}  "
+                f"[{sc.get('cache_type_k', '?')}/fa={sc.get('flash_attn', '?')}"
+                f"/{sc.get('build_tag') or 'no-tag'}]",
+            )
+        print(f"{'TOTAL':<28} {total / 1e9:8.3f} GB  ({len(recs)} sessions)")
         return 0
 
     if ns.cmd == "inspect":
-        Sidecar.read(sidecar_path_for(ns.save_file))
+        sc = Sidecar.read(sidecar_path_for(ns.save_file))
+        print(json.dumps(sc.to_dict(), indent=2, sort_keys=True))
         return 0
 
     if ns.cmd == "prune":
-        store.prune(ns.cache_dir, ns.budget_gb, dry_run=ns.dry_run)
+        report = store.prune(ns.cache_dir, ns.budget_gb, dry_run=ns.dry_run)
+        print(json.dumps(report, indent=2))
         return 0
 
     return 2
