@@ -9,11 +9,14 @@ description = "Automatic KV-cache session persistence for llama-server: save the
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "anyio>=4.9.0",
     "click>=8.5.1",
     "httpx>=0.28.1",
     "orjson>=3.13.0",
     "pydantic-settings>=2.16.3",
     "rich>=15.0.0",
+    "starlette>=0.47.0",
+    "uvicorn>=0.34.0",
 ]
 authors = [{name = "Vimal Nakrani", email = "vimalnak@gmail.com"}]
 license = {file = "LICENSE"}
@@ -43,7 +46,7 @@ where = ["src"]
 # checks) would silently weaken the gate mypy strict used to be.
 preset = "strict"
 project-includes = ["src", "tests"]
-search-path = ["src"]
+search-path = ["src", "tests"]
 python-version = "3.13"  # matches requires-python
 python-platform = "all"  # OS-independent library
 check-unannotated-defs = true  # mypy check_untyped_defs

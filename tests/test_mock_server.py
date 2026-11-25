@@ -31,13 +31,16 @@ def make_mock_server(record: dict[str, Any] | None = None) -> LlamaServer:  # no
       record["calls"]         -- endpoint names in request order
       record["chat_requests"] -- parsed bodies of /v1/chat/completions requests
     Setting record["chat_error"] to an HTTP status makes the chat endpoint fail.
+    Setting record["save_dir"] to a directory makes the save endpoint write the
+    .bin file there (mirroring the real server, which writes to
+    --slot-save-path); record["save_bytes"] sets its size (default 1234).
     """
 
     def note(name: str) -> None:
         if record is not None:
             record.setdefault("calls", []).append(name)
 
-    def handler(request: httpx.Request) -> httpx.Response:  # noqa: PLR0911
+    def handler(request: httpx.Request) -> httpx.Response:  # noqa: C901, PLR0911
         method = request.method
         path = request.url.path
         query = request.url.query
@@ -47,12 +50,29 @@ def make_mock_server(record: dict[str, Any] | None = None) -> LlamaServer:  # no
             note("health")
             return httpx.Response(200, json={"status": "ok"})
 
+        # Match props endpoint.
+        if method == "GET" and path == "/props":
+            note("props")
+            return httpx.Response(
+                200,
+                json={"build_info": "b9871", "total_slots": 1, "n_ctx": 4096},
+            )
+
         # Match save endpoint.
         if query and b"action=save" in query:
             note("slots:save")
+            body = json.loads(request.content.decode())
+            if record is not None and isinstance(record.get("save_dir"), str):
+                (Path(record["save_dir"]) / body["filename"]).write_bytes(
+                    b"\0" * int(record.get("save_bytes", 1234))
+                )
             return httpx.Response(
                 200,
-                json={"filename": "test.bin", "n_saved": 100, "n_written": 1234},
+                json={
+                    "filename": body["filename"],
+                    "n_saved": 100,
+                    "n_written": 1234,
+                },
             )
 
         # Match restore endpoint.

@@ -6,6 +6,8 @@
     stillwarm list    <cache_dir>                 sessions, sizes, ages
     stillwarm inspect <save_file>                 sidecar
     stillwarm prune   <cache_dir> --budget-gb N   LRU-prune to a disk budget
+    stillwarm proxy   --cache-dir DIR --server URL ...
+                      KV-cache middleware in front of one llama-server
 
 Human output is a rich table by default; every command takes --json for the
 raw machine-readable form. Exit codes: 0 success, 1 runtime error, 2 usage.
@@ -13,15 +15,21 @@ raw machine-readable form. Exit codes: 0 success, 1 runtime error, 2 usage.
 
 from __future__ import annotations
 
+import logging
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
 import click
+import httpx
 import orjson
+import uvicorn
 from rich.console import Console
 from rich.table import Table
 
 from . import __version__, store
+from .proxy import ProxyConfig, ProxySettings, ProxyStartupError, build_app
+from .server import ServerError
 from .sidecar import Sidecar, sidecar_path_for
 
 _BYTES_PER_GB = 10**9
@@ -180,6 +188,153 @@ def prune_sessions(cache_dir: Path, budget_gb: float, dry_run: bool, as_json: bo
         console.print(
             f"[yellow]warning:[/yellow] {entry['session_id']} skipped (locked): {entry['error']}"
         )
+
+
+@cli.command("proxy")
+@click.option(
+    "--server",
+    default=None,
+    help="Upstream llama-server base URL (env STILLWARM_BASE_URL).",
+)
+@click.option(
+    "--cache-dir",
+    "cache_dir",
+    required=True,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Directory holding the session triples; must equal the upstream --slot-save-path.",
+)
+@click.option(
+    "--model-sha256",
+    "model_sha256",
+    default=None,
+    help="SHA-256 of the model GGUF (env STILLWARM_MODEL_SHA256).",
+)
+@click.option(
+    "--flash-attn",
+    "flash_attn",
+    type=click.Choice(["on", "off"]),
+    default=None,
+    help="The upstream flash-attn setting, resolved (env STILLWARM_FLASH_ATTN).",
+)
+@click.option(
+    "--cache-type-k",
+    "cache_type_k",
+    default=None,
+    help="KV cache type for k (env STILLWARM_CACHE_TYPE_K).",
+)
+@click.option(
+    "--cache-type-v",
+    "cache_type_v",
+    default=None,
+    help="KV cache type for v (env STILLWARM_CACHE_TYPE_V).",
+)
+@click.option(
+    "--swa-full",
+    "swa_full",
+    is_flag=True,
+    default=None,
+    help="The upstream was started with --swa-full (env STILLWARM_SWA_FULL).",
+)
+@click.option(
+    "--ctx-size",
+    "ctx_size",
+    type=int,
+    default=None,
+    help="Slot ctx size; default: taken from the upstream GET /props.",
+)
+@click.option("--host", default=None, help="Bind address (env STILLWARM_HOST).")
+@click.option("--port", type=int, default=None, help="Bind port (env STILLWARM_PORT).")
+@click.option(
+    "--token",
+    default=None,
+    help="Bearer token clients must present; never forwarded (env STILLWARM_TOKEN).",
+)
+@click.option(
+    "--timeout",
+    type=float,
+    default=None,
+    help="Upstream request timeout in seconds (env STILLWARM_TIMEOUT).",
+)
+@click.option(
+    "--budget-gb",
+    "budget_gb",
+    type=float,
+    default=None,
+    help="Disk budget; LRU-prune after each save (env STILLWARM_DISK_BUDGET_GB).",
+)
+@click.option(
+    "--no-probe",
+    "no_probe",
+    is_flag=True,
+    default=None,
+    help="Save without the determinism probe (env STILLWARM_NO_PROBE).",
+)
+def proxy_command(  # noqa: PLR0913, PLR0917 — CLI flags mirror ProxyConfig one-for-one
+    server: str | None,
+    cache_dir: Path,
+    model_sha256: str | None,
+    flash_attn: str | None,
+    cache_type_k: str | None,
+    cache_type_v: str | None,
+    swa_full: bool | None,
+    ctx_size: int | None,
+    host: str | None,
+    port: int | None,
+    token: str | None,
+    timeout: float | None,
+    budget_gb: float | None,
+    no_probe: bool | None,
+) -> None:
+    """Run the KV-cache middleware in front of one single-slot llama-server."""
+    settings = ProxySettings()
+    cfg = ProxyConfig(
+        base_url=server or settings.base_url,
+        cache_dir=str(cache_dir),
+        model_sha256=model_sha256 or settings.model_sha256,
+        flash_attn=flash_attn or settings.flash_attn,
+        cache_type_k=cache_type_k or settings.cache_type_k,
+        cache_type_v=cache_type_v or settings.cache_type_v,
+        swa_full=swa_full if swa_full is not None else settings.swa_full,
+        ctx_size=ctx_size if ctx_size is not None else settings.ctx_size,
+        host=host or settings.host,
+        port=port if port is not None else settings.port,
+        token=token if token is not None else settings.token,
+        timeout=timeout if timeout is not None else settings.timeout,
+        disk_budget_gb=budget_gb if budget_gb is not None else settings.disk_budget_gb,
+        no_probe=no_probe if no_probe is not None else settings.no_probe,
+    )
+    missing = [
+        label
+        for label, value in (
+            ("--model-sha256 (STILLWARM_MODEL_SHA256)", cfg.model_sha256),
+            ("--flash-attn (STILLWARM_FLASH_ATTN)", cfg.flash_attn),
+            ("--cache-type-k (STILLWARM_CACHE_TYPE_K)", cfg.cache_type_k),
+            ("--cache-type-v (STILLWARM_CACHE_TYPE_V)", cfg.cache_type_v),
+        )
+        if not value
+    ]
+    if missing:
+        msg = "stillwarm proxy requires: " + ", ".join(missing)
+        raise click.ClickException(msg)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+    )
+    try:
+        app = build_app(cfg)
+    except (ProxyStartupError, ServerError, httpx.RequestError) as e:
+        msg = f"cannot start proxy: {e}"
+        raise click.ClickException(msg) from e
+    uvicorn.run(
+        app,
+        host=cfg.host,
+        port=cfg.port,
+        log_level="warning",
+        access_log=False,
+        timeout_graceful_shutdown=60,
+    )
 
 
 def main() -> int:

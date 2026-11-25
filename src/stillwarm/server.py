@@ -6,6 +6,7 @@
 Covers exactly the endpoints stillwarm needs, with shapes verified against
 llama.cpp release b9871:
   GET  /health
+  GET  /props
   POST /tokenize            {"content": str}            -> {"tokens": [int]}
   POST /completion          (non-stream)                -> {..., "timings": {...}}
   POST /v1/chat/completions (non-stream)                -> OpenAI chat response
@@ -67,11 +68,10 @@ class LlamaServer:
     def _request(
         self, method: str, path: str, payload: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        try:
-            resp = self._client.request(method, path, json=payload)
-            return dict(resp.json() or {})
-        except httpx.HTTPStatusError as e:
-            raise ServerError(e.response.status_code, e.response.text) from None
+        resp = self._client.request(method, path, json=payload)
+        if resp.is_error:
+            raise ServerError(resp.status_code, resp.text)
+        return dict(resp.json() or {})
 
     def close(self) -> None:
         """Close the underlying HTTP client."""
@@ -85,6 +85,10 @@ class LlamaServer:
             return False
         else:
             return True
+
+    def props(self) -> dict[str, Any]:
+        """Server properties: build_info, total_slots, n_ctx, model metadata."""
+        return self._request("GET", "/props")
 
     def tokenize(self, text: str) -> list[int]:
         """Tokenize text and return token IDs."""
