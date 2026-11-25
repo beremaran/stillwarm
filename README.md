@@ -3,7 +3,7 @@
 Your local LLM re-prefills everything after every restart. stillwarm fixes that.
 
 llama.cpp's `llama-server` can save a conversation's KV cache (the model's
-per-token "notes") to disk and load it back — but nothing does it automatically,
+per-token "notes") to disk and load it back, but nothing does it automatically,
 and nothing checks that the file you're loading matches the server you're
 loading it into. stillwarm is a zero-dependency Python library:
 
@@ -76,7 +76,7 @@ at that same directory:
   process (NFS, EFS, a shared volume).
 
 If your process cannot read the server's save directory, there is nothing to
-restore — and `store`/`prune` cannot see the files either.
+restore, and `store`/`prune` cannot see the files either.
 
 ## Compatibility contract
 
