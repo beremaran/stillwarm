@@ -20,9 +20,6 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 
-[project.scripts]
-stillwarm = "stillwarm.cli:main"
-
 [project.optional-dependencies]
 dev = ["mypy>=1.8"]
 
@@ -58,9 +55,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"src/stillwarm/cli.py" = [
-  "T201",  # it is a CLI; printing is the job
-]
 "tests/*" = [
   "ANN",  # pytest injects fixtures; typing them is noise
   "CPY001",  # no copyright header on test files

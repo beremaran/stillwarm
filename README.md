@@ -5,7 +5,7 @@ Your local LLM re-prefills everything after every restart. stillwarm fixes that.
 llama.cpp's `llama-server` can save a conversation's KV cache (the model's
 per-token "notes") to disk and load it back — but nothing does it automatically,
 and nothing checks that the file you're loading matches the server you're
-loading it into. stillwarm is a zero-dependency Python library + small CLI:
+loading it into. stillwarm is a zero-dependency Python library:
 
 - restore-before-request, save-after-response — sessions survive restarts;
 - a metadata sidecar per save — incompatible files are refused with a reason, never silently misloaded;
@@ -46,12 +46,14 @@ r = sw.ask("paper-review", document + "\n\nQ: And the weaknesses?\nA:", n_predic
 print(r.restored, r.prompt_n)  # True, ~a few dozen tokens instead of thousands
 ```
 
-`cache_dir` must be the directory passed to `--slot-save-path`. CLI:
+`cache_dir` must be the directory passed to `--slot-save-path`. Inspect and
+prune the cache through the `store` API:
 
-```
-stillwarm list  ~/.stillwarm            # sessions, sizes, ages
-stillwarm inspect ~/.stillwarm/paper-review.bin
-stillwarm prune ~/.stillwarm --budget-gb 50 [--dry-run]
+```python
+from stillwarm import store
+
+store.sessions("~/.stillwarm")  # sessions, sizes, ages, sidecars
+store.prune("~/.stillwarm", 50.0, dry_run=True)
 ```
 
 ## Compatibility contract
