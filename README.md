@@ -117,13 +117,6 @@ batching noise.
 
 Cost: ~2x the restore time, plus one 64-token decode (~1.5 s for an 8B model).
 
-## Supported platforms
-
-- macOS (Apple Silicon) — tested.
-- Linux — should work (same llama-server HTTP API). Not benchmarked.
-- Windows — untested. The code avoids POSIX-only modules and uses atomic
-  writes via `os.replace`. Reports welcome.
-
 ## Tests
 
 Unit tests run anywhere under `pytest`. Integration tests need real
