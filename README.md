@@ -22,7 +22,7 @@ it into. stillwarm is a zero-dependency Python library:
 ## Install
 
 ```sh
-pip install stillwarm
+uv add stillwarm
 ```
 
 Python 3.9 or newer. No runtime dependencies.

@@ -1,5 +1,5 @@
 # Runs the integration test suite against the compose-provided llama-servers.
-FROM python:3.13-slim
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
 WORKDIR /work
 
@@ -7,6 +7,6 @@ COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 COPY tests ./tests
 
-RUN pip install --no-cache-dir .[dev]
+RUN uv sync --extra dev
 
-CMD ["pytest", "tests/test_integration.py", "-v"]
+CMD ["uv", "run", "pytest", "tests/test_integration.py", "-v"]
