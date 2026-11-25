@@ -38,30 +38,43 @@ _MAX_ERROR_BODY = 300
 
 
 class LlamaServer:
-    """HTTP client for llama-server slot save/restore endpoints."""
+    """HTTP client for llama-server slot save/restore endpoints.
 
-    def __init__(self, base_url: str, timeout: float = DEFAULT_TIMEOUT_S) -> None:
+    Uses a persistent httpx.Client for connection pooling. For testing,
+    pass a custom transport via the `transport` kwarg.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = DEFAULT_TIMEOUT_S,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
         """Initialize with the server's base URL and request timeout.
 
         base_url may be any reachable http(s) URL, local or remote.
+        transport, if provided, replaces the default HTTP transport.
         """
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self._client = httpx.Client(
+            base_url=self.base_url,
+            timeout=self.timeout,
+            transport=transport,
+        )
 
     def _request(
         self, method: str, path: str, payload: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        url = self.base_url + path
         try:
-            resp = httpx.request(
-                method,
-                url,
-                json=payload,
-                timeout=self.timeout,
-            )
+            resp = self._client.request(method, path, json=payload)
             return dict(resp.json() or {})
         except httpx.HTTPStatusError as e:
             raise ServerError(e.response.status_code, e.response.text) from None
+
+    def close(self) -> None:
+        """Close the underlying HTTP client."""
+        self._client.close()
 
     def health(self) -> bool:
         """Check if the server is responding."""

@@ -29,7 +29,6 @@ Design decisions (each grounded in measured llama.cpp behavior):
 
 import contextlib
 import hashlib
-import os
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,19 +39,11 @@ import orjson
 from . import store as store_mod
 from .compat import REFUSE, ServerProfile, check, check_build
 from .server import DEFAULT_SAMPLER, PROBE_N_PREDICT, PROBE_SAMPLER, LlamaServer, ServerError
+from .settings import get_settings
 from .sidecar import Sidecar, sidecar_path_for
 
 # Default generation length for ask() when the caller does not choose one.
 DEFAULT_N_PREDICT = 256
-
-# Silently-ineffective-restore guard: if the first request after a restore
-# re-prefills more than this fraction of the prompt — or more than this many
-# tokens, whichever is larger — the restore did not take. Override with the
-# STILLWARM_GUARD_* env vars.
-_INEFFECTIVE_RATIO = 0.5
-_INEFFECTIVE_MIN_TOKENS = 64
-_ENV_GUARD_RATIO = "STILLWARM_GUARD_RATIO"
-_ENV_GUARD_MIN_TOKENS = "STILLWARM_GUARD_MIN_TOKENS"
 
 
 class RefusedRestoreError(RuntimeError):
@@ -84,30 +75,6 @@ def _hash_tokens(tokens: list[int]) -> str:
     return hashlib.sha256(orjson.dumps(tokens)).hexdigest()
 
 
-def _env_guard_ratio() -> float:
-    """Guard ratio override from the environment, else the measured default."""
-    raw = os.environ.get(_ENV_GUARD_RATIO)
-    if raw is None:
-        return _INEFFECTIVE_RATIO
-    try:
-        return float(raw)
-    except ValueError:
-        msg = f"{_ENV_GUARD_RATIO}={raw!r} is not a valid float"
-        raise ValueError(msg) from None
-
-
-def _env_guard_min_tokens() -> int:
-    """Guard token floor from the environment, else the measured default."""
-    raw = os.environ.get(_ENV_GUARD_MIN_TOKENS)
-    if raw is None:
-        return _INEFFECTIVE_MIN_TOKENS
-    try:
-        return int(raw)
-    except ValueError:
-        msg = f"{_ENV_GUARD_MIN_TOKENS}={raw!r} is not a valid integer"
-        raise ValueError(msg) from None
-
-
 class Session:
     """Wrapper around llama-server that auto-restores and saves KV-cache sessions."""
 
@@ -134,20 +101,22 @@ class Session:
             id_slot: The llama-server slot ID to use.
 
         The silently-ineffective guard thresholds (measured defaults) can be
-        overridden with the STILLWARM_GUARD_RATIO / STILLWARM_GUARD_MIN_TOKENS
-        environment variables; malformed values raise at construction.
+        overridden with STILLWARM_GUARD_RATIO / STILLWARM_GUARD_MIN_TOKENS env
+        vars, or via a .env file loaded by pydantic-settings. Malformed values
+        raise at construction.
 
         """
+        settings = get_settings()
         self.server = server
         self.profile = profile
         self.cache_dir = Path(cache_dir).expanduser()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.server_build_tag = server_build_tag
-        self.disk_budget_gb = disk_budget_gb
+        self.disk_budget_gb = disk_budget_gb or settings.disk_budget_gb
         self.verify = verify
         self.id_slot = id_slot
-        self._guard_ratio = _env_guard_ratio()
-        self._guard_min_tokens = _env_guard_min_tokens()
+        self._guard_ratio = settings.guard_ratio
+        self._guard_min_tokens = settings.guard_min_tokens
         self._live_prefix: dict[str, str] = {}
         self._loaded: str | None = None
 

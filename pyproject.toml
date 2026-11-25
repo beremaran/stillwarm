@@ -8,7 +8,7 @@ version = "0.3.0"
 description = "Automatic KV-cache session persistence for llama-server: save the model's 'notes' to disk, restore them after a restart, refuse incompatible files."
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["httpx", "orjson"]
+dependencies = ["httpx", "orjson", "pydantic-settings"]
 authors = [{name = "Vimal Nakrani", email = "vimalnak@gmail.com"}]
 license = {file = "LICENSE"}
 keywords = ["llama.cpp", "llama-server", "kv-cache", "local-llm"]

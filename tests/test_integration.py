@@ -22,7 +22,6 @@ Run:
   docker compose -f docker-compose.integration.yml up --build --abort-on-container-exit test
 """
 
-import os
 import shutil
 import time
 import warnings
@@ -31,6 +30,7 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from stillwarm import (
     PROBE_SAMPLER,
@@ -43,11 +43,29 @@ from stillwarm import (
 )
 from stillwarm.sidecar import Sidecar, sidecar_path_for
 
-URL_PRIMARY = os.environ.get("STILLWARM_TEST_URL_PRIMARY", "")
-URL_TWIN = os.environ.get("STILLWARM_TEST_URL_TWIN", "")
-URL_FA_OFF = os.environ.get("STILLWARM_TEST_URL_FA_OFF", "")
-URL_SMALL_CTX = os.environ.get("STILLWARM_TEST_URL_SMALL_CTX", "")
-CACHE_DIR = os.environ.get("STILLWARM_TEST_CACHE_DIR", "")
+
+class _IntegrationSettings(BaseSettings):
+    """Integration test configuration from environment."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="STILLWARM_TEST_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+    url_primary: str = ""
+    url_twin: str = ""
+    url_fa_off: str = ""
+    url_small_ctx: str = ""
+    cache_dir: str = ""
+
+
+ts = _IntegrationSettings()
+URL_PRIMARY = ts.url_primary
+URL_TWIN = ts.url_twin
+URL_FA_OFF = ts.url_fa_off
+URL_SMALL_CTX = ts.url_small_ctx
+CACHE_DIR = ts.cache_dir
 
 # sha256 of the model the compose file globs from the Hugging Face cache
 # (bartowski/SmolLM2-135M-Instruct-GGUF, SmolLM2-135M-Instruct-Q8_0.gguf).
