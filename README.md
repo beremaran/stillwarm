@@ -19,12 +19,6 @@ it into. stillwarm is a zero-dependency Python library:
 - `verify` — an integrity mode that byte-checks a restored state against a
   probe captured at save time.
 
-Measured on an M3 Max (llama.cpp b9871, Llama-3.1-8B Q4_K_M, same-session
-thermally controlled): resuming a session from disk instead of re-prefilling it
-is **71x faster at 8K tokens, 159x at 32K, 201x at 64K** (restore + first-token
-time vs cold prefill) and ~50x cheaper in energy at 32K. Even with a purged
-page cache, restore wins for any document longer than ~300 tokens.
-
 ## Install
 
 ```sh
@@ -136,8 +130,7 @@ Small and finished beats large and abandoned.
 
 ## Supported platforms
 
-- macOS (Apple Silicon) — tested. All numbers above come from an M3 Max
-  running llama.cpp b9871.
+- macOS (Apple Silicon) — tested.
 - Linux — should work (same llama-server HTTP API). Not benchmarked.
 - Windows — untested. The code avoids POSIX-only modules and uses atomic
   writes via `os.replace`. Reports welcome.
