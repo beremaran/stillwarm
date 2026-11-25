@@ -1,5 +1,6 @@
 import os
 import time
+from pathlib import Path
 
 from stillwarm import store
 from stillwarm.sidecar import Sidecar
@@ -59,8 +60,6 @@ def test_prune_tolerates_locked_files(tmp_path, monkeypatch) -> None:
     """Windows holds open files: PermissionError on unlink must skip the locked
     session and keep pruning others (Windows holds open files).
     """
-    from pathlib import Path
-
     _mk_session(tmp_path, "locked", 600, age_s=2000)
     _mk_session(tmp_path, "old", 600, age_s=1000)
     _mk_session(tmp_path, "new", 600, age_s=10)

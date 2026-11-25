@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import time
 import warnings
+from pathlib import Path
 
 import pytest
 
@@ -42,7 +43,7 @@ PORT = 8213
 BUILD_TAG = "b9871"
 
 pytestmark = pytest.mark.skipif(
-    not (os.path.exists(BIN) and os.path.exists(MODEL)),
+    not (Path(BIN).exists() and Path(MODEL).exists()),
     reason="llama-server binary or tiny test model not available",
 )
 
@@ -234,8 +235,7 @@ def test_verify_mismatch_on_corrupted_copy(cache_dir) -> None:
     with Server() as api:
         sw = make_session(api, cache_dir)
         with pytest.raises((VerifyFailedError, RefusedRestoreError, Exception)) as ei:
-            ok = sw.restore("s1corrupt", verify=True)
-            assert ok is not True  # if no exception, must not pass
+            sw.restore("s1corrupt", verify=True)
         assert not isinstance(ei.value, AssertionError)
 
 
@@ -296,7 +296,7 @@ def test_save_point_doc_prefill_in_prime_flow(cache_dir) -> None:
     with Server() as api:
         sw = make_session(api, cache_dir)
         api.completion(PREFIX, 0, cache_prompt=True)  # prefill, generate nothing
-        sw._live_prefix["primed"] = PREFIX
+        sw._live_prefix["primed"] = PREFIX  # noqa: SLF001 — prime flow needs a prefill-only state
         sc = sw.save("primed")  # generated_tokens defaults to 0
         assert sc.save_point == "doc_prefill"
         assert sc.n_saved_tokens <= len(api.tokenize(PREFIX)) + 2  # prompt(+BOS) only
