@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from stillwarm import __version__
 from stillwarm.cli import cli
 from stillwarm.sidecar import Sidecar, sidecar_path_for
 
@@ -131,4 +132,4 @@ def test_prune_negative_budget_exit_2(runner: CliRunner, tmp_path: Path) -> None
 def test_version(runner: CliRunner) -> None:
     result = runner.invoke(cli, ["--version"])
     assert result.exit_code == 0
-    assert "0.4.0" in result.output
+    assert __version__ in result.output

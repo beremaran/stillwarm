@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stillwarm"
-version = "0.4.0"
+version = "0.5.0"
 description = "Automatic KV-cache session persistence for llama-server: save the model's 'notes' to disk, restore them after a restart, refuse incompatible files."
 readme = "README.md"
 requires-python = ">=3.13"
