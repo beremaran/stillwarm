@@ -31,13 +31,8 @@ class ServerError(RuntimeError):
         super().__init__(f"llama-server HTTP {status}: {body[:300]}")
 
 
-#: pinned sampler parameters for probe generation — part of the sidecar contract.
-#: ignore_eos keeps every probe exactly PROBE_N_PREDICT tokens (constant-length
-#: probes make the determinism comparison independent of where EOS falls).
 PROBE_SAMPLER: dict[str, Any] = {"temperature": 0, "top_k": 1, "seed": 42, "ignore_eos": True}
 PROBE_N_PREDICT = 64
-
-#: default sampler for user requests through Session.ask (greedy, EOS honored).
 DEFAULT_SAMPLER: dict[str, Any] = {"temperature": 0, "top_k": 1, "seed": 42}
 
 
@@ -49,7 +44,6 @@ class LlamaServer:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
-    # -- plumbing ------------------------------------------------------------
     def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
         url = urllib.parse.urljoin(self.base_url, path)
         scheme = urllib.parse.urlparse(url).scheme
@@ -69,7 +63,6 @@ class LlamaServer:
         except urllib.error.HTTPError as e:
             raise ServerError(e.code, e.read().decode("utf-8", "replace")) from None
 
-    # -- endpoints -----------------------------------------------------------
     def health(self) -> bool:
         """Check if the server is responding."""
         try:

@@ -37,26 +37,22 @@ SIDECAR_SUFFIX = ".stillwarm.json"
 class Sidecar:
     """Everything needed to decide whether a save file may be restored."""
 
-    # --- REFUSE-contract fields (mismatch => never load) ---
     model_sha256: str
-    flash_attn: str  # "on" | "off"  ("auto" is never written; resolve first)
-    cache_type_k: str  # e.g. "f16", "q8_0", "q4_0"
+    flash_attn: str
+    cache_type_k: str
     cache_type_v: str
     swa_full: bool
-    n_saved_tokens: int  # ctx-fit rule: refuse if > server ctx
-    prompt_prefix_sha256: str  # SHA-256 over the tokenized conversation prefix (cache key part)
+    n_saved_tokens: int
+    prompt_prefix_sha256: str
 
-    # --- ADVISORY fields (mismatch => warn, don't refuse) ---
-    build_tag: str = ""  # e.g. "b9871"
+    build_tag: str = ""
     llamacpp_commit: str = ""
 
-    # --- verification + bookkeeping ---
-    probe_hash: str = ""  # save-time greedy continuation hash (empty = no probe)
-    probe_n_predict: int = 0  # tokens generated for the probe (0 = no probe)
-    probe_sampler_json: str = ""  # exact sampler params used for the probe, JSON
-    save_point: str = "doc_prefill"  # doc_prefill | after_generation (stillwarm always
-    # saves BEFORE probing, so state = the prefix)
-    save_file: str = ""  # basename of the .bin this sidecar describes
+    probe_hash: str = ""
+    probe_n_predict: int = 0
+    probe_sampler_json: str = ""
+    save_point: str = "doc_prefill"
+    save_file: str = ""
     size_bytes: int = 0
     created_at: str = ""
     sidecar_version: int = SIDECAR_VERSION
@@ -74,7 +70,6 @@ class Sidecar:
         if not self.created_at:
             self.created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-    # -- serialization ------------------------------------------------------
     def to_dict(self) -> dict:
         """Convert sidecar to a JSON-serializable dict."""
         return dataclasses.asdict(self)
@@ -107,7 +102,6 @@ class Sidecar:
         """Read and parse a sidecar JSON file."""
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
-    # -- cache key ----------------------------------------------------------
     def cache_key(self) -> str:
         """Compute the cache key from material sidecar fields.
 

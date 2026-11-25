@@ -29,7 +29,7 @@ class ServerProfile:
     """The relevant properties of the running llama-server."""
 
     model_sha256: str
-    flash_attn: str  # resolved "on" | "off"
+    flash_attn: str
     cache_type_k: str
     cache_type_v: str
     swa_full: bool
@@ -40,7 +40,7 @@ class ServerProfile:
 class Decision:
     """Result of a compatibility check."""
 
-    verdict: str  # REFUSE | ADVISORY | OK
+    verdict: str
     refusals: list[str]
     advisories: list[str]
 
@@ -54,7 +54,6 @@ def check(sidecar: Sidecar, server: ServerProfile) -> Decision:
     refusals: list[str] = []
     advisories: list[str] = []
 
-    # --- REFUSE contract (each rule maps to a measured Block-D outcome) ---
     if sidecar.model_sha256 != server.model_sha256:
         refusals.append("model mismatch: save was made with a different model file")
     if sidecar.flash_attn != server.flash_attn:
@@ -78,11 +77,7 @@ def check(sidecar: Sidecar, server: ServerProfile) -> Decision:
             f"ctx {server.ctx_size} (ctx-fit rule; server would refuse anyway, loudly)",
         )
 
-    # --- ADVISORY (measured compatible; warn only) ---
-    # Cross-build restore measured WORKS in both directions across >=5 weeks
-    # (b9386<->b9871); format stability is NOT guaranteed upstream, hence the warning.
-    # (Only emitted when the running build is known to the caller; the sidecar side
-    # is always recorded.)
+    # build tag is advisory only (measured compatible across builds)
 
     verdict = REFUSE if refusals else (ADVISORY if advisories else OK)
     return Decision(verdict, refusals, advisories)

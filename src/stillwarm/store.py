@@ -44,7 +44,7 @@ def sessions(cache_dir: str) -> list[dict]:
         if sc_path.exists():
             try:
                 rec["sidecar"] = Sidecar.read(sc_path).to_dict()
-            except (OSError, ValueError) as e:  # unreadable sidecar is a fact worth surfacing
+            except (OSError, ValueError) as e:
                 rec["sidecar_error"] = str(e)
         out.append(rec)
     out.sort(key=lambda r: r["mtime"])
@@ -82,7 +82,7 @@ def prune(cache_dir: str, budget_gb: float, *, dry_run: bool = False) -> dict:
                     p.unlink()
         except PermissionError as e:
             skipped_locked.append({"session_id": r["session_id"], "error": str(e)})
-            continue  # locked (e.g. Windows open handle): skip
+            continue
         removed.append(
             {"session_id": r["session_id"], "bytes": r["bytes"], "age_hours": r["age_hours"]},
         )

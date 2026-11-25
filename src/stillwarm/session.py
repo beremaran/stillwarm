@@ -9,9 +9,9 @@ restore-before-request, save-after-response, against a running llama-server:
     profile = ServerProfile(model_sha256=..., flash_attn="on", cache_type_k="f16",
                             cache_type_v="f16", swa_full=False, ctx_size=16384)
     sw = Session(server, profile, cache_dir="~/.stillwarm", server_build_tag="b9871")
-    reply = sw.ask("sess-1", document + question, n_predict=256)   # cold: prefill + save
+    reply = sw.ask("sess-1", document + question, n_predict=256)
     ... server restarts ...
-    reply = sw.ask("sess-1", document + question2, n_predict=256)  # restore + answer
+    reply = sw.ask("sess-1", document + question2, n_predict=256)
 
 Design decisions (each grounded in a measured stillwarm-bench result):
   * cache key = model SHA + fa + ctk/ctv + swa_full + tokenized-prefix hash
@@ -58,8 +58,8 @@ class AskResult:
 
     content: str
     timings: dict
-    restored: bool  # this request was served from a disk restore
-    verified: bool | None  # None = --verify not requested
+    restored: bool
+    verified: bool | None
     prompt_n: int | None
     warning: str = ""
 
@@ -102,10 +102,9 @@ class Session:
         self.disk_budget_gb = disk_budget_gb
         self.verify = verify
         self.id_slot = id_slot
-        self._live_prefix: dict = {}  # session_id -> prefix text currently in the slot
-        self._loaded: str | None = None  # session_id currently in the slot
+        self._live_prefix: dict = {}
+        self._loaded: str | None = None
 
-    # -- paths ---------------------------------------------------------------
     def _bin_name(self, session_id: str) -> str:
         return f"{session_id}.bin"
 
@@ -115,14 +114,10 @@ class Session:
     def _prefix_path(self, session_id: str) -> Path:
         return self.cache_dir / f"{session_id}.prefix.txt"
 
-    # -- key material ----------------------------------------------------------
     def _prefix_hash(self, prefix_text: str) -> str:
         toks = self.server.tokenize(prefix_text)
         return _hash_tokens(toks)
 
-    # ==========================================================================
-    # THE CORE LOOP
-    # ==========================================================================
     def ask(
         self,
         session_id: str,
@@ -152,11 +147,9 @@ class Session:
         if restored:
             warning = self._ineffective_guard(session_id, full_prompt, prompt_n)
 
-        # the new prefix = everything the slot now holds (prompt + generated reply)
         new_prefix = full_prompt + res.get("content", "")
         self._live_prefix[session_id] = new_prefix
         self._loaded = session_id
-        # the slot state now ENDS WITH the sampled reply -> after_generation state
         generated_n = (res.get("timings") or {}).get("predicted_n") or 0
         self.save(session_id, generated_tokens=generated_n)
 
@@ -172,9 +165,6 @@ class Session:
             warning=warning,
         )
 
-    # ==========================================================================
-    # SAVE — file is written at the PRE-probe state (save before probe; critical)
-    # ==========================================================================
     def save(self, session_id: str, *, generated_tokens: int = 0) -> Sidecar:
         """Save the slot's KV cache to disk and write its sidecar.
 
@@ -194,9 +184,6 @@ class Session:
         # 1. SAVE FIRST: the file must represent the pre-probe state.
         save = self.server.slot_save(binname, self.id_slot)
 
-        # 2. Probe AFTER the save: 64 greedy tokens continuing the prefix.
-        #    (This advances the live KV state; the FILE is already sealed. The next
-        #    user request re-trims the probe tail via normal prefix matching.)
         probe = self.server.completion(
             prefix,
             PROBE_N_PREDICT,
@@ -206,7 +193,6 @@ class Session:
         )
         probe_hash = _hash_tokens(probe.get("tokens") or probe.get("content"))
 
-        # 3. Sidecar + retained prefix text (needed to re-run the probe at restore).
         sc = Sidecar(
             model_sha256=self.profile.model_sha256,
             flash_attn=self.profile.flash_attn,
@@ -224,15 +210,11 @@ class Session:
             size_bytes=save["n_written"],
         )
         sc.write(sidecar_path_for(self._bin_path(session_id)))
-        # atomic prefix write (same temp + os.replace pattern; Windows-safe)
         ptmp = self._prefix_path(session_id).with_name(self._prefix_path(session_id).name + ".tmp")
         ptmp.write_text(prefix, encoding="utf-8")
         ptmp.replace(self._prefix_path(session_id))
         return sc
 
-    # ==========================================================================
-    # RESTORE (+ optional --verify: restore -> probe -> compare -> RE-RESTORE)
-    # ==========================================================================
     def restore(self, session_id: str, *, verify: bool = False) -> bool | None:
         """Restore a saved session into the server slot.
 
@@ -242,7 +224,6 @@ class Session:
         binname = self._bin_name(session_id)
         sc = Sidecar.read(sidecar_path_for(self._bin_path(session_id)))
 
-        # refusal contract BEFORE touching the server
         decision = check(sc, self.profile)
         if decision.verdict == REFUSE:
             raise RefusedRestoreError("; ".join(decision.refusals))
@@ -266,8 +247,6 @@ class Session:
             )
             got = _hash_tokens(probe.get("tokens") or probe.get("content"))
             verified = got == sc.probe_hash
-            # RE-RESTORE so the served state is exactly the restored state,
-            # never the post-probe state.
             self.server.slot_erase(self.id_slot)
             self.server.slot_restore(binname, self.id_slot)
             if not verified:
@@ -288,9 +267,6 @@ class Session:
         self._loaded = session_id
         return verified
 
-    # ==========================================================================
-    # SILENTLY-INEFFECTIVE GUARD (a measured failure mode, surfaced as a warning)
-    # ==========================================================================
     def _ineffective_guard(self, session_id: str, full_prompt: str, prompt_n: int | None) -> str:
         """Detect and warn when a restore was silently ineffective.
 
@@ -304,7 +280,6 @@ class Session:
             full_tokens = len(self.server.tokenize(full_prompt))
         except ServerError:
             return ""
-        # reuse was effective if most of the prompt came from the restored cache
         if prompt_n <= max(0.5 * full_tokens, 64):
             return ""
         save_point = ""
