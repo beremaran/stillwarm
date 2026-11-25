@@ -6,7 +6,6 @@
 Covers exactly the endpoints stillwarm needs, with shapes verified against the
 pinned llama.cpp build (b9871) during the stillwarm-bench measurements:
   GET  /health
-  GET  /props
   POST /tokenize            {"content": str}            -> {"tokens": [int]}
   POST /completion          (non-stream)                -> {..., "timings": {...}}
   POST /slots/{id}?action=save|restore|erase  {"filename": str}
@@ -73,19 +72,6 @@ class LlamaServer:
             return False
         else:
             return True
-
-    def props(self) -> dict[str, Any]:
-        """Get server properties including loaded model info."""
-        return self._request("GET", "/props")
-
-    def ctx_size(self) -> int | None:
-        """Per-slot context size, from /props when the build exposes it."""
-        props = self.props()
-        for probe in (("default_generation_settings", "n_ctx"),):
-            v = props.get(probe[0], {})
-            if isinstance(v, dict) and isinstance(v.get(probe[1]), int):
-                return cast("int", v[probe[1]])
-        return None
 
     def tokenize(self, text: str) -> list[int]:
         """Tokenize text and return token IDs."""

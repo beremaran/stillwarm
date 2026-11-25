@@ -24,7 +24,6 @@ stillwarm-bench Block-D outcome, 2026-07-05):
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -102,25 +101,6 @@ class Sidecar:
     def read(cls, path: str | Path) -> Sidecar:
         """Read and parse a sidecar JSON file."""
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
-
-    def cache_key(self) -> str:
-        """Compute the cache key from material sidecar fields.
-
-        SHA-256 over exactly the fields the portability matrix showed matter:
-        model SHA + fa + ctk/ctv + swa_full + tokenized prefix. -ngl and ctx are
-        deliberately excluded (measured irrelevant / handled by the ctx-fit rule).
-        """
-        material = "\x1f".join(
-            [
-                self.model_sha256,
-                self.flash_attn,
-                self.cache_type_k,
-                self.cache_type_v,
-                "swa_full=1" if self.swa_full else "swa_full=0",
-                self.prompt_prefix_sha256,
-            ],
-        )
-        return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 class IncompatibleSidecarError(ValueError):

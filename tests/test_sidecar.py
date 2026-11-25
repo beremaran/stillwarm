@@ -41,17 +41,5 @@ def test_unknown_version_refused(tmp_path) -> None:
         Sidecar.read(p)
 
 
-def test_cache_key_components() -> None:
-    a = mk()
-    assert a.cache_key() == mk().cache_key()  # deterministic
-    assert a.cache_key() != mk(flash_attn="off").cache_key()  # fa in key
-    assert a.cache_key() != mk(cache_type_k="q8_0").cache_key()  # ctk in key
-    assert a.cache_key() != mk(swa_full=True).cache_key()  # swa_full in key
-    assert a.cache_key() != mk(prompt_prefix_sha256="q" * 64).cache_key()
-    # measured-irrelevant properties are NOT part of the key:
-    assert a.cache_key() == mk(build_tag="b9386").cache_key()  # build advisory only
-    assert a.cache_key() == mk(n_saved_tokens=42).cache_key()  # ctx handled by fit rule
-
-
 def test_sidecar_path() -> None:
     assert str(sidecar_path_for("/x/y/cache.bin")).endswith("/x/y/cache.bin.stillwarm.json")

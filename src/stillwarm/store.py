@@ -52,11 +52,6 @@ def sessions(cache_dir: str) -> list[dict[str, Any]]:
     return out
 
 
-def total_bytes(cache_dir: str) -> int:
-    """Sum the byte sizes of all saved sessions."""
-    return sum(r["bytes"] for r in sessions(cache_dir))
-
-
 def prune(cache_dir: str, budget_gb: float, *, dry_run: bool = False) -> dict[str, Any]:
     """Delete least-recently-used session triples until under budget_gb.
 
