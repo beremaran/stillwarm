@@ -5,6 +5,8 @@ from pathlib import Path
 from stillwarm import store
 from stillwarm.sidecar import Sidecar
 
+_BYTES_PER_GB = 1e9
+
 
 def _mk_session(d, sid, size, age_s) -> None:
     b = d / f"{sid}.bin"
@@ -36,7 +38,7 @@ def test_list_sorted_oldest_first(tmp_path) -> None:
 def test_prune_lru_removes_triple(tmp_path) -> None:
     _mk_session(tmp_path, "old", 600, age_s=1000)
     _mk_session(tmp_path, "new", 600, age_s=10)
-    rep = store.prune(tmp_path, budget_gb=1e-6)  # budget = 1000 bytes
+    rep = store.prune(tmp_path, budget_gb=1000 / _BYTES_PER_GB)  # budget = 1000 bytes
     assert [r["session_id"] for r in rep["removed"]] == ["old"]
     assert not (tmp_path / "old.bin").exists()
     assert not (tmp_path / "old.bin.stillwarm.json").exists()
@@ -46,7 +48,7 @@ def test_prune_lru_removes_triple(tmp_path) -> None:
 
 def test_prune_dry_run(tmp_path) -> None:
     _mk_session(tmp_path, "a", 600, age_s=100)
-    rep = store.prune(tmp_path, budget_gb=1e-9, dry_run=True)
+    rep = store.prune(tmp_path, budget_gb=1 / _BYTES_PER_GB, dry_run=True)  # budget = 1 byte
     assert rep["removed"]
     assert (tmp_path / "a.bin").exists()
 
@@ -71,7 +73,7 @@ def test_prune_tolerates_locked_files(tmp_path, monkeypatch) -> None:
         return real_unlink(self, *a, **k)
 
     monkeypatch.setattr(Path, "unlink", fake_unlink)
-    rep = store.prune(tmp_path, budget_gb=1300e-9)  # room for 2 files: one removal suffices
+    rep = store.prune(tmp_path, budget_gb=1300 / _BYTES_PER_GB)  # room for 2 files
     assert [s["session_id"] for s in rep["skipped_locked"]] == ["locked"]
     assert [r["session_id"] for r in rep["removed"]] == ["old"]
     assert (tmp_path / "locked.bin").exists()  # untouched

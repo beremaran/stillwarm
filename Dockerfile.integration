@@ -1,0 +1,12 @@
+# Runs the integration test suite against the compose-provided llama-servers.
+FROM python:3.13-slim
+
+WORKDIR /work
+
+COPY pyproject.toml README.md LICENSE ./
+COPY src ./src
+COPY tests ./tests
+
+RUN pip install --no-cache-dir .[dev]
+
+CMD ["pytest", "tests/test_integration.py", "-v"]

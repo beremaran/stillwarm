@@ -1,0 +1,90 @@
+# Integration test harness: four real llama-server containers (rolling
+# ghcr.io/ggml-org/llama.cpp:server) sharing one save volume, plus a test
+# container that runs the integration suite against them over HTTP.
+#
+# One-time prerequisite on the host — the test model, read from your
+# Hugging Face cache and mounted read-only:
+#
+#   hf download bartowski/SmolLM2-135M-Instruct-GGUF \
+#       --include "SmolLM2-135M-Instruct-Q8_0.gguf"
+#
+# Run:
+#
+#   docker compose -f docker-compose.integration.yml up --build --abort-on-container-exit test
+#   docker compose -f docker-compose.integration.yml down -v   # wipes the save volume
+
+name: stillwarm-integration
+
+services:
+  # ctx 1024, flash-attn on — the primary server.
+  server-primary:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'exec /app/llama-server -m "$(find /hf -name SmolLM2-135M-Instruct-Q8_0.gguf -print -quit)" --ctx-size 1024 --flash-attn on --parallel 1 --slot-save-path /saves'
+    environment:
+      - LLAMA_ARG_HOST=0.0.0.0
+      - LLAMA_ARG_PORT=8080
+    volumes:
+      - ${HF_HOME:-$HOME/.cache/huggingface}:/hf:ro
+      - saves:/saves
+
+  # Same configuration, fresh process: plays "the server restarted".
+  server-twin:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'exec /app/llama-server -m "$(find /hf -name SmolLM2-135M-Instruct-Q8_0.gguf -print -quit)" --ctx-size 1024 --flash-attn on --parallel 1 --slot-save-path /saves'
+    environment:
+      - LLAMA_ARG_HOST=0.0.0.0
+      - LLAMA_ARG_PORT=8081
+    volumes:
+      - ${HF_HOME:-$HOME/.cache/huggingface}:/hf:ro
+      - saves:/saves
+
+  # ctx 1024, flash-attn off — the REFUSE(fa) restore target.
+  server-fa-off:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'exec /app/llama-server -m "$(find /hf -name SmolLM2-135M-Instruct-Q8_0.gguf -print -quit)" --ctx-size 1024 --flash-attn off --parallel 1 --slot-save-path /saves'
+    environment:
+      - LLAMA_ARG_HOST=0.0.0.0
+      - LLAMA_ARG_PORT=8082
+    volumes:
+      - ${HF_HOME:-$HOME/.cache/huggingface}:/hf:ro
+      - saves:/saves
+
+  # ctx 256, flash-attn on — the REFUSE(ctx-fit) restore target.
+  server-small-ctx:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'exec /app/llama-server -m "$(find /hf -name SmolLM2-135M-Instruct-Q8_0.gguf -print -quit)" --ctx-size 256 --flash-attn on --parallel 1 --slot-save-path /saves'
+    environment:
+      - LLAMA_ARG_HOST=0.0.0.0
+      - LLAMA_ARG_PORT=8083
+    volumes:
+      - ${HF_HOME:-$HOME/.cache/huggingface}:/hf:ro
+      - saves:/saves
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.integration
+    depends_on:
+      - server-primary
+      - server-twin
+      - server-fa-off
+      - server-small-ctx
+    environment:
+      STILLWARM_TEST_URL_PRIMARY: http://server-primary:8080
+      STILLWARM_TEST_URL_TWIN: http://server-twin:8081
+      STILLWARM_TEST_URL_FA_OFF: http://server-fa-off:8082
+      STILLWARM_TEST_URL_SMALL_CTX: http://server-small-ctx:8083
+      STILLWARM_TEST_CACHE_DIR: /saves
+    volumes:
+      - saves:/saves
+
+volumes:
+  saves:

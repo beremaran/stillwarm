@@ -21,7 +21,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["mypy>=1.8"]
+dev = ["mypy>=1.8", "pytest>=8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -51,7 +51,7 @@ ignore = [
   "D203",  # incompatible with D211 (formatter uses D211)
   "D213",  # incompatible with D212 (formatter uses D212)
   "COM812",  # formatter manages trailing commas
-  "S310",  # base_url is always local llama-server (http://127.0.0.1:8080)
+  "S310",  # base_url is user-provided; the scheme is validated to http/https
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -62,5 +62,4 @@ ignore = [
   "INP001",  # test modules are standalone by design
   "PLR2004",  # literals in comparisons are the point of a test
   "S101",  # asserts are the test idiom
-  "S603",  # harness launches the pinned local llama-server binary
 ]
