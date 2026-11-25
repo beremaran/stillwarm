@@ -117,17 +117,6 @@ batching noise.
 
 Cost: ~2x the restore time, plus one 64-token decode (~1.5 s for an 8B model).
 
-## Non-goals
-
-- Not a serving framework. One client talks to one llama-server, remote
-  included ([Remote servers](#remote-servers)).
-- No multi-machine cache sharing, no vLLM (LMCache owns that space).
-- llama-server only. Ollama and LM Studio do not expose the slot save and
-  restore endpoints this needs.
-- No compression research.
-
-Small and finished beats large and abandoned.
-
 ## Supported platforms
 
 - macOS (Apple Silicon) — tested.
