@@ -4,11 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stillwarm"
-version = "0.3.0"
+version = "0.4.0"
 description = "Automatic KV-cache session persistence for llama-server: save the model's 'notes' to disk, restore them after a restart, refuse incompatible files."
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["httpx", "orjson", "pydantic-settings"]
+dependencies = [
+    "click>=8.5.1",
+    "httpx",
+    "orjson",
+    "pydantic-settings",
+    "rich>=15.0.0",
+]
 authors = [{name = "Vimal Nakrani", email = "vimalnak@gmail.com"}]
 license = {file = "LICENSE"}
 keywords = ["llama.cpp", "llama-server", "kv-cache", "local-llm"]
@@ -20,6 +26,9 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Operating System :: OS Independent",
 ]
+
+[project.scripts]
+stillwarm = "stillwarm.cli:main"
 
 [project.optional-dependencies]
 dev = ["pyrefly>=1.5", "pytest>=8"]
@@ -67,6 +76,9 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"src/stillwarm/cli.py" = [
+  "FBT",  # click callbacks take the bool flags they declare
+]
 "tests/*" = [
   "ANN",  # pytest injects fixtures; typing them is noise
   "CPY001",  # no copyright header on test files
